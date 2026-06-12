@@ -88,7 +88,7 @@ cat model.stl | fstl - --export-png --output render.png
 ```
 
 Every switch is listed below. `fstl --help` prints the same reference,
-and `man fstl` has the full manual. The tables match fstl 0.12.0.
+and `man fstl` has the full manual. The tables match fstl 0.13.0.
 
 #### Mode selection
 

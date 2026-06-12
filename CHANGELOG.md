@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.0 (2026-06-11)
+## 0.13.0 (2026-06-12)
 
 Major modernization and feature release: Qt 6 readiness, bug fixes, image
 and animation exporters (GUI and command line), Linux packaging, and
