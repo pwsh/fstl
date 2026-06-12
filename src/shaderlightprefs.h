@@ -7,6 +7,7 @@ class Canvas;
 class QLabel;
 class QLineEdit;
 class QComboBox;
+class QDoubleSpinBox;
 
 class ShaderLightPrefs : public QDialog
 {
@@ -15,8 +16,7 @@ public:
     ShaderLightPrefs(QWidget* parent, Canvas* _canvas);
 
 protected:
-    void resizeEvent(QResizeEvent* event) override;
-    void moveEvent(QMoveEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private slots:
     void buttonAmbientColorClicked();
@@ -30,6 +30,9 @@ private slots:
     void comboDirectionsChanged(int ind);
     void resetDirection();
 
+    void buttonBackgroundColorClicked();
+    void resetBackgroundColor();
+
     void okButtonClicked();
 
 private:
@@ -39,6 +42,11 @@ private:
     QPushButton* buttonDirectiveColor;
     QLineEdit* editDirectiveFactor;
     QComboBox* comboDirections;
+    QPushButton* buttonBackgroundColor;
+    QDoubleSpinBox* spinBrightness;
+    QDoubleSpinBox* spinOpacity;
+
+    void updateBackgroundSwatch();
 
     const static QString PREFS_GEOM;
 };

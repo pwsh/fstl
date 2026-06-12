@@ -1,6 +1,18 @@
 #include "shaderlightprefs.h"
 #include "canvas.h"
+#include <QApplication>
 #include <QColorDialog>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QDoubleValidator>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QSettings>
+#include <QVBoxLayout>
 
 const QString ShaderLightPrefs::PREFS_GEOM = "shaderPrefsGeometry";
 
@@ -27,6 +39,9 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     middleLayout->addWidget(new QLabel("Ambient Color"), 0, 0);
     middleLayout->addWidget(new QLabel("Directive Color"), 1, 0);
     middleLayout->addWidget(new QLabel("Direction"), 2, 0);
+    middleLayout->addWidget(new QLabel("Brightness"), 3, 0);
+    middleLayout->addWidget(new QLabel("Opacity"), 4, 0);
+    middleLayout->addWidget(new QLabel("Background"), 5, 0);
 
     QPixmap dummy(20, 20);
 
@@ -35,36 +50,37 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     buttonAmbientColor->setIcon(QIcon(dummy));
     middleLayout->addWidget(buttonAmbientColor, 0, 1);
     buttonAmbientColor->setFocusPolicy(Qt::NoFocus);
-    connect(buttonAmbientColor, SIGNAL(clicked(bool)), this, SLOT(buttonAmbientColorClicked()));
+    connect(buttonAmbientColor, &QPushButton::clicked, this, &ShaderLightPrefs::buttonAmbientColorClicked);
 
     editAmbientFactor = new QLineEdit;
-    editAmbientFactor->setValidator(new QDoubleValidator);
+    // setValidator does not take ownership; parent to the line edit
+    editAmbientFactor->setValidator(new QDoubleValidator(editAmbientFactor));
     editAmbientFactor->setText(QString("%1").arg(canvas->getAmbientFactor()));
     middleLayout->addWidget(editAmbientFactor, 0, 2);
-    connect(editAmbientFactor, SIGNAL(editingFinished()), this, SLOT(editAmbientFactorFinished()));
+    connect(editAmbientFactor, &QLineEdit::editingFinished, this, &ShaderLightPrefs::editAmbientFactorFinished);
 
     QPushButton* buttonResetAmbientColor = new QPushButton("Reset");
     middleLayout->addWidget(buttonResetAmbientColor, 0, 3);
     buttonResetAmbientColor->setFocusPolicy(Qt::NoFocus);
-    connect(buttonResetAmbientColor, SIGNAL(clicked(bool)), this, SLOT(resetAmbientColorClicked()));
+    connect(buttonResetAmbientColor, &QPushButton::clicked, this, &ShaderLightPrefs::resetAmbientColorClicked);
 
     dummy.fill(canvas->getDirectiveColor());
     buttonDirectiveColor = new QPushButton;
     buttonDirectiveColor->setIcon(QIcon(dummy));
     middleLayout->addWidget(buttonDirectiveColor, 1, 1);
     buttonDirectiveColor->setFocusPolicy(Qt::NoFocus);
-    connect(buttonDirectiveColor, SIGNAL(clicked(bool)), this, SLOT(buttonDirectiveColorClicked()));
+    connect(buttonDirectiveColor, &QPushButton::clicked, this, &ShaderLightPrefs::buttonDirectiveColorClicked);
 
     editDirectiveFactor = new QLineEdit;
-    editDirectiveFactor->setValidator(new QDoubleValidator);
+    editDirectiveFactor->setValidator(new QDoubleValidator(editDirectiveFactor));
     editDirectiveFactor->setText(QString("%1").arg(canvas->getDirectiveFactor()));
     middleLayout->addWidget(editDirectiveFactor, 1, 2);
-    connect(editDirectiveFactor, SIGNAL(editingFinished()), this, SLOT(editDirectiveFactorFinished()));
+    connect(editDirectiveFactor, &QLineEdit::editingFinished, this, &ShaderLightPrefs::editDirectiveFactorFinished);
 
     QPushButton* buttonResetDirectiveColor = new QPushButton("Reset");
     middleLayout->addWidget(buttonResetDirectiveColor, 1, 3);
     buttonResetDirectiveColor->setFocusPolicy(Qt::NoFocus);
-    connect(buttonResetDirectiveColor, SIGNAL(clicked(bool)), this, SLOT(resetDirectiveColorClicked()));
+    connect(buttonResetDirectiveColor, &QPushButton::clicked, this, &ShaderLightPrefs::resetDirectiveColorClicked);
 
     // Fill in directions
 
@@ -72,12 +88,60 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     middleLayout->addWidget(comboDirections, 2, 1, 1, 2);
     comboDirections->addItems(canvas->getNameDir());
     comboDirections->setCurrentIndex(canvas->getCurrentLightDirection());
-    connect(comboDirections, SIGNAL(currentIndexChanged(int)), this, SLOT(comboDirectionsChanged(int)));
+    connect(comboDirections, qOverload<int>(&QComboBox::currentIndexChanged), this, &ShaderLightPrefs::comboDirectionsChanged);
 
     QPushButton* buttonResetDirection = new QPushButton("Reset");
     middleLayout->addWidget(buttonResetDirection, 2, 3);
     buttonResetDirection->setFocusPolicy(Qt::NoFocus);
-    connect(buttonResetDirection, SIGNAL(clicked(bool)), this, SLOT(resetDirection()));
+    connect(buttonResetDirection, &QPushButton::clicked, this, &ShaderLightPrefs::resetDirection);
+
+    // Overall light brightness (multiplies both factors)
+    spinBrightness = new QDoubleSpinBox;
+    spinBrightness->setRange(0.0, 3.0);
+    spinBrightness->setSingleStep(0.1);
+    spinBrightness->setDecimals(2);
+    spinBrightness->setValue(canvas->getLightBrightness());
+    middleLayout->addWidget(spinBrightness, 3, 1, 1, 2);
+    connect(spinBrightness, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this](double b) { canvas->setLightBrightness(b); });
+
+    QPushButton* buttonResetBrightness = new QPushButton("Reset");
+    middleLayout->addWidget(buttonResetBrightness, 3, 3);
+    buttonResetBrightness->setFocusPolicy(Qt::NoFocus);
+    connect(buttonResetBrightness, &QPushButton::clicked, this, [this] {
+        canvas->resetLightBrightness();
+        spinBrightness->setValue(canvas->getLightBrightness());
+    });
+
+    // Model opacity (applies to every draw mode)
+    spinOpacity = new QDoubleSpinBox;
+    spinOpacity->setRange(0.0, 1.0);
+    spinOpacity->setSingleStep(0.05);
+    spinOpacity->setDecimals(2);
+    spinOpacity->setValue(canvas->getModelOpacity());
+    middleLayout->addWidget(spinOpacity, 4, 1, 1, 2);
+    connect(spinOpacity, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this](double o) { canvas->setModelOpacity(o); });
+
+    QPushButton* buttonResetOpacity = new QPushButton("Reset");
+    middleLayout->addWidget(buttonResetOpacity, 4, 3);
+    buttonResetOpacity->setFocusPolicy(Qt::NoFocus);
+    connect(buttonResetOpacity, &QPushButton::clicked, this, [this] {
+        canvas->resetModelOpacity();
+        spinOpacity->setValue(canvas->getModelOpacity());
+    });
+
+    // Background color (applies to every draw mode; reset = gradient)
+    buttonBackgroundColor = new QPushButton;
+    middleLayout->addWidget(buttonBackgroundColor, 5, 1);
+    buttonBackgroundColor->setFocusPolicy(Qt::NoFocus);
+    connect(buttonBackgroundColor, &QPushButton::clicked, this, &ShaderLightPrefs::buttonBackgroundColorClicked);
+    updateBackgroundSwatch();
+
+    QPushButton* buttonResetBackground = new QPushButton("Reset");
+    middleLayout->addWidget(buttonResetBackground, 5, 3);
+    buttonResetBackground->setFocusPolicy(Qt::NoFocus);
+    connect(buttonResetBackground, &QPushButton::clicked, this, &ShaderLightPrefs::resetBackgroundColor);
 
     // Ok button
     QWidget* boxButton = new QWidget;
@@ -90,7 +154,7 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     boxButtonLayout->addWidget(okButton);
     this->layout()->addWidget(boxButton);
     okButton->setFocusPolicy(Qt::NoFocus);
-    connect(okButton, SIGNAL(clicked(bool)), this, SLOT(okButtonClicked()));
+    connect(okButton, &QPushButton::clicked, this, &ShaderLightPrefs::okButtonClicked);
 
     QSettings settings;
     if (!settings.value(PREFS_GEOM).isNull()) {
@@ -156,6 +220,36 @@ void ShaderLightPrefs::resetDirectiveColorClicked()
     canvas->update();
 }
 
+void ShaderLightPrefs::updateBackgroundSwatch()
+{
+    const QColor bg = canvas->getBackgroundColor();
+    QPixmap swatch(20, 20);
+    if (bg.isValid()) {
+        swatch.fill(bg);
+        buttonBackgroundColor->setText("");
+    } else {
+        swatch.fill(QColor(0, 25, 35)); // approximate gradient tone
+        buttonBackgroundColor->setText("Gradient");
+    }
+    buttonBackgroundColor->setIcon(QIcon(swatch));
+}
+
+void ShaderLightPrefs::buttonBackgroundColorClicked()
+{
+    const QColor initial = canvas->getBackgroundColor().isValid() ? canvas->getBackgroundColor() : QColor(0, 25, 35);
+    QColor newColor = QColorDialog::getColor(initial, this, QString("Choose background color"), QColorDialog::DontUseNativeDialog);
+    if (newColor.isValid()) {
+        canvas->setBackgroundColor(newColor);
+        updateBackgroundSwatch();
+    }
+}
+
+void ShaderLightPrefs::resetBackgroundColor()
+{
+    canvas->resetBackgroundColor();
+    updateBackgroundSwatch();
+}
+
 void ShaderLightPrefs::okButtonClicked()
 {
     this->close();
@@ -174,12 +268,10 @@ void ShaderLightPrefs::resetDirection()
     canvas->update();
 }
 
-void ShaderLightPrefs::resizeEvent(QResizeEvent* event)
+void ShaderLightPrefs::hideEvent(QHideEvent* event)
 {
+    // Persist geometry once when the dialog is dismissed rather than on
+    // every move/resize (the dialog is hidden, not destroyed, on close)
     QSettings().setValue(PREFS_GEOM, saveGeometry());
-}
-
-void ShaderLightPrefs::moveEvent(QMoveEvent* event)
-{
-    QSettings().setValue(PREFS_GEOM, saveGeometry());
+    QDialog::hideEvent(event);
 }

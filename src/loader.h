@@ -5,6 +5,8 @@
 
 #include "mesh.h"
 
+class QFile;
+
 class Loader : public QThread
 {
     Q_OBJECT

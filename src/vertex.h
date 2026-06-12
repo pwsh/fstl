@@ -1,7 +1,7 @@
 #ifndef VEC3_H
 #define VEC3_H
 
-#include <QtOpenGL/QtOpenGL>
+#include <qopengl.h>
 
 /*
  *  Represents an optionally-indexed vertex in space

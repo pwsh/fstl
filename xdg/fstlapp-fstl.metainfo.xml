@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.fstl_app.fstl</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>fstl</name>
+  <developer id="io.github.fstl_app">
+    <name>Matt Keeter and the fstl-app contributors</name>
+  </developer>
+  <summary>Fast viewer and exporter for STL 3D model files</summary>
+  <description>
+    <p>
+      fstl is a very fast viewer for .stl 3D model files, designed to load
+      and render very high-polygon models instantly — 2 million triangles
+      at 60+ FPS on a mid-range laptop.
+    </p>
+    <p>Viewer features:</p>
+    <ul>
+      <li>Arcball rotation, panning, and zoom about the cursor</li>
+      <li>Four draw modes: shaded, wireframe, surface angle, and a configurable two-light shader</li>
+      <li>Standard viewpoints, perspective or orthographic projection, and optional axes display</li>
+      <li>Automatic reload when the model changes on disk — ideal alongside CAD tools</li>
+      <li>Browse between .stl files in a folder with the arrow keys</li>
+    </ul>
+    <p>Export features:</p>
+    <ul>
+      <li>Screenshots (PNG/JPG) of the current view</li>
+      <li>Rotation PNG series: evenly spaced views around a chosen axis</li>
+      <li>Animated turntable GIFs, looping up to 360° or bouncing between two angles</li>
+      <li>A full command-line mode (fstl --help) that renders without opening a window, with
+          configurable model color, transparent or colored backgrounds, resolution limits,
+          batch directory processing, and stdin pipelines</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">fstlapp-fstl.desktop</launchable>
+  <url type="homepage">https://github.com/fstl-app/fstl</url>
+  <url type="bugtracker">https://github.com/fstl-app/fstl/issues</url>
+  <provides>
+    <binary>fstl</binary>
+    <mediatype>model/stl</mediatype>
+  </provides>
+  <categories>
+    <category>Utility</category>
+    <category>Graphics</category>
+    <category>3DGraphics</category>
+    <category>Viewer</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.12.0" date="2026-06-12">
+      <description>
+        <p>
+          PNG and animated GIF exporters (GUI and command line), Qt 6 support,
+          crash fixes, faster loading, desktop integration, and a man page.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

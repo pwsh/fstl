@@ -1,6 +1,7 @@
 #version 120
 
 uniform float zoom;
+uniform float model_alpha;
 uniform vec4 ambient_light_color;
 uniform vec4 directive_light_color;
 uniform vec3 directive_light_direction;
@@ -22,5 +23,5 @@ void main() {
 
     // float coef = dot(ec_normal,dir);
     // vec3 color = coef * lightcolor + (1.0 - coef) * objectcolor;
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(color, model_alpha);
 }

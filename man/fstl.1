@@ -1,0 +1,231 @@
+.TH FSTL 1 "June 2026" "fstl 0.12.0" "User Commands"
+.SH NAME
+fstl \- fast viewer and exporter for .stl 3D model files
+.SH SYNOPSIS
+.B fstl
+[\fB\-f\fR|\fB\-\-foreground\fR]
+[\fIfile.stl\fR]
+.br
+.B fstl
+\fIinputs\fR
+\fB\-\-export\-png\fR|\fB\-\-export\-gif\fR
+[\fIoptions\fR]
+.SH DESCRIPTION
+.B fstl
+is a very fast viewer for STL (stereolithography) 3D model files,
+designed to load and render very high-polygon models instantly \-
+2 million triangles at 60+ FPS on a mid-range laptop.
+.PP
+Launched without export switches it opens a GUI viewer with arcball
+rotation (left-drag), panning (right-drag), zoom about the cursor
+(scroll wheel), keyboard movement (rebindable via View > Configure
+Keyboard Shortcuts), optional momentum spin (a released drag keeps the
+model rotating), four draw modes, standard viewpoints, and automatic
+reload when the file changes on disk.
+.PP
+GUI exporters cover screenshots, rotation PNG series, animated
+turntable GIFs, and rotation MP4 videos with per-axis degree totals
+(View > Animate Rotation additionally plays and live-records continuous
+rotation with per-axis speeds and optional randomization). MP4 features
+require
+.BR ffmpeg (1)
+on the PATH.
+.PP
+With
+.B \-\-export\-png
+and/or
+.BR \-\-export\-gif ,
+fstl runs as a command-line renderer with no window: it reads STL files
+(or stdin) and writes PNG images or animated GIFs, with configurable
+model color, background (transparent by default), resolution, and
+rotation.
+.SH GUI OPTIONS
+.TP
+.BR \-f ", " \-\-foreground
+Stay attached to the launching terminal. By default the GUI forks into
+the background so the shell prompt returns immediately and the viewer
+survives the terminal closing.
+.TP
+.I file.stl
+The model to open. A leading
+.B ~
+expands to the home directory. Without a file, a demo sphere is shown.
+.SH EXPORT MODE SELECTION
+.TP
+.B \-\-export\-png
+Export PNG image(s); one image per angle given in
+.BR \-\-angles .
+.TP
+.B \-\-export\-gif
+Export an animated GIF of the model rotating. May be combined with the
+other export switches in a single run.
+.TP
+.B \-\-export\-mp4
+Export an MP4 video of the model rotating (requires
+.BR ffmpeg (1)
+on the PATH). Duration and per-axis rotation totals come from
+.BR \-\-duration ", " \-\-rx ", " \-\-ry ", " \-\-rz .
+.TP
+.BR \-h ", " \-\-help
+Print usage information and exit (never opens the GUI).
+.TP
+.B \-\-help\-all
+Like
+.BR \-\-help ,
+but also lists Qt's own command-line options.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.SH INPUT AND OUTPUT OPTIONS
+.TP
+.BI \-i ", " \-\-input " file"
+Input .stl file; may be repeated. Positional arguments work the same
+way. Passing
+.B \-
+reads STL data (binary or ASCII) from standard input, so fstl can sit
+at the end of a pipeline.
+.TP
+.BI \-\-input\-dir " dir"
+Render every .stl file in the directory (sorted), in addition to any
+other inputs.
+.TP
+.BI \-o ", " \-\-output " name"
+Output file name; the correct .png/.gif extension is added if missing.
+Only valid with a single input \- use
+.B \-\-output\-dir
+for batches. Default: the input file's base name.
+.TP
+.BI \-\-output\-dir " dir"
+Directory for output files. Default: alongside the input file (the
+current directory for stdin input).
+.PP
+With several PNG angles, files are numbered
+.IR name_000_0deg.png ,
+.IR name_001_45deg.png ,
+and so on.
+.SH APPEARANCE OPTIONS
+.TP
+.BI \-\-color " color"
+Model color: a common (SVG/CSS) color name such as
+.IR red ", " steelblue ", " goldenrod ,
+or a hex value
+.IR #rgb ", " #rrggbb ", " #aarrggbb .
+Default: white.
+.TP
+.BI \-\-bg " color"
+Background color, same formats. Default: transparent. Any background
+with alpha below 255 produces a transparent background. GIF
+transparency is 1\-bit (each pixel fully opaque or fully invisible), so
+transparent GIFs have harder edges than PNGs.
+.TP
+.BI \-\-opacity " value"
+Model opacity, 0..1 (default 1).
+.TP
+.BI \-\-brightness " value"
+Light brightness multiplier (default 1).
+.TP
+.BI \-\-light\-dir " x,y,z"
+Light direction vector (default 0,-0.5,1).
+.TP
+.BI \-\-settings " file"
+Read appearance defaults (model/background colors, opacity, brightness,
+light direction) from a settings .ini exported via File > Export
+Settings in the GUI; explicit switches override. Ideal for styling
+batch pipelines consistently.
+.TP
+.BI \-\-duration " s"
+MP4: video length in seconds (default 8).
+.TP
+.BI \-\-rx " deg" ", " \-\-ry " deg" ", " \-\-rz " deg"
+MP4: total rotation per axis, each may exceed 360 degrees (defaults
+0, 360, 0); per-axis speed follows from degrees/duration.
+.SH RESOLUTION OPTIONS
+.TP
+.BI \-\-width " px" ", " \-\-height " px"
+Maximum output size. Defaults: 1024 for PNG, 640 for GIF. The output
+always preserves the model's projected aspect ratio: the image is
+fitted inside the limits, sized so the model (over all exported angles)
+fills the frame with a small margin, centered on x and y. Giving only
+one limit applies it to both dimensions.
+.SH ROTATION OPTIONS
+.TP
+.BI \-\-axis " x\fR|\fPy\fR|\fPz"
+Rotation axis in screen space:
+.B y
+= vertical (turntable, default),
+.B x
+= horizontal (tumble),
+.B z
+= screen normal (roll).
+.TP
+.BI \-\-angles " list"
+PNG: comma-separated rotation angles in degrees, e.g.
+.IR 0,45,90 .
+Default: 0 (a straight-on front view).
+.TP
+.BI \-\-sweep " deg"
+GIF loop mode: total rotation, up to 360 degrees (default 360). The
+animation loops forever.
+.TP
+.B \-\-bounce
+GIF: bounce back and forth between
+.B \-\-from
+and
+.B \-\-to
+instead of looping in one direction.
+.TP
+.BI \-\-from " deg" ", " \-\-to " deg"
+Bounce endpoints in degrees (defaults \-90 and 90).
+.TP
+.BI \-\-step " deg"
+Degrees of rotation per GIF frame (default 3; 360/3 = 120 frames).
+.TP
+.BI \-\-fps " fps"
+GIF playback speed in frames per second (default 25).
+.SH EXAMPLES
+.TP
+Open a model in the viewer:
+.B fstl model.stl
+.TP
+Straight-on transparent PNG, white model, max 1024 px:
+.B fstl model.stl \-\-export\-png
+.TP
+Full 360\(de turntable GIF, transparent background, max 640 px:
+.B fstl model.stl \-\-export\-gif
+.TP
+Bounce \-90\(de..+90\(de, green model on white, 200 px wide:
+.B fstl model.stl \-\-export\-gif \-\-bounce \-\-from \-90 \-\-to 90 \-\-color '#00ff88' \-\-bg white \-\-width 200
+.TP
+Four PNG views in one run:
+.B fstl model.stl \-\-export\-png \-\-angles '0,45,90,135'
+.TP
+Batch a directory; read from a pipeline:
+.B fstl \-\-input\-dir ./models \-\-export\-png \-\-output\-dir ./renders
+.br
+.B cat model.stl | fstl \- \-\-export\-png \-\-output render.png
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+At least one input failed to load or render.
+.TP
+.B 2
+Invalid arguments.
+.SH ENVIRONMENT
+Exports need working OpenGL. With no display available fstl falls back
+to Qt's
+.B offscreen
+platform; if that cannot create a GL context (no EGL), run through
+.BR xvfb-run (1).
+.B QT_QPA_PLATFORM
+overrides the Qt platform plugin as usual.
+.SH SEE ALSO
+.BR xvfb-run (1)
+.PP
+Project page:
+.I https://github.com/fstl-app/fstl
+.SH AUTHOR
+Originally written by Matt Keeter; maintained by the fstl-app
+contributors.

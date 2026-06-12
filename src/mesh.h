@@ -1,8 +1,7 @@
 #ifndef MESH_H
 #define MESH_H
 
-#include <QString>
-#include <QtOpenGL/QtOpenGL>
+#include <qopengl.h>
 
 #include <vector>
 

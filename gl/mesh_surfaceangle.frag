@@ -1,6 +1,7 @@
 #version 120
 
 uniform float zoom;
+uniform float model_alpha;
 
 varying vec3 ec_pos;
 
@@ -13,5 +14,5 @@ void main() {
     float y = dot(ec_normal, vec3(0.0, 0.985, 0.174));
     float z = dot(ec_normal, vec3(0.0, -0.174, 0.985));
 
-    gl_FragColor = vec4(0.5-0.5*x, 0.5-0.5*y, 0.5+0.5*z, 1.0);
+    gl_FragColor = vec4(0.5-0.5*x, 0.5-0.5*y, 0.5+0.5*z, model_alpha);
 }

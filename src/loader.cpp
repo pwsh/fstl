@@ -1,3 +1,9 @@
+#include <QDataStream>
+#include <QFile>
+#include <QVector>
+#include <QtEndian>
+
+#include <algorithm>
 #include <future>
 
 #include "loader.h"
@@ -60,7 +66,7 @@ Mesh* mesh_from_verts(uint32_t tri_count, QVector<Vertex>& verts)
     }
 
     // Sort the set of vertices (to deduplicate)
-    parallel_sort(verts.begin(), verts.end(), threads);
+    parallel_sort(verts.data(), verts.data() + verts.size(), threads);
 
     // This vector will store triangles as sets of 3 indices
     std::vector<GLuint> indices(tri_count * 3);
@@ -70,7 +76,7 @@ Mesh* mesh_from_verts(uint32_t tri_count, QVector<Vertex>& verts)
     // Unique vertices are moved so that they occupy the first vertex_count
     // positions in the verts array.
     size_t vertex_count = 0;
-    for (auto v : verts) {
+    for (const auto& v : verts) {
         if (!vertex_count || v != verts[vertex_count - 1]) {
             verts[vertex_count++] = v;
         }
@@ -80,7 +86,7 @@ Mesh* mesh_from_verts(uint32_t tri_count, QVector<Vertex>& verts)
 
     std::vector<GLfloat> flat_verts;
     flat_verts.reserve(vertex_count * 3);
-    for (auto v : verts) {
+    for (const auto& v : verts) {
         flat_verts.push_back(v.x);
         flat_verts.push_back(v.y);
         flat_verts.push_back(v.z);
@@ -99,13 +105,18 @@ Mesh* Loader::load_stl()
         return NULL;
     }
 
-    qint64 file_size, file_size_old;
-    file_size = file.size();
-    do {
-        file_size_old = file_size;
-        QThread::usleep(100000);
+    // On reload (e.g. autoreload while a slicer or CAD tool is still
+    // writing), wait for the file size to settle before parsing.  Initial
+    // opens skip this so loading isn't delayed by 100ms for no reason.
+    if (is_reload) {
+        qint64 file_size, file_size_old;
         file_size = file.size();
-    } while (file_size != file_size_old);
+        do {
+            file_size_old = file_size;
+            QThread::usleep(100000);
+            file_size = file.size();
+        } while (file_size != file_size_old);
+    }
 
     // First, try to read the stl as an ASCII file
     if (file.read(5) == "solid") {
@@ -136,8 +147,9 @@ Mesh* Loader::read_stl_binary(QFile& file)
     uint32_t tri_count;
     data >> tri_count;
 
-    // Verify that the file is the right size
-    if (file.size() != 84 + tri_count * 50) {
+    // Verify that the file is the right size (in 64-bit arithmetic, so
+    // models beyond ~85M triangles don't overflow the check)
+    if (file.size() != 84 + qint64(tri_count) * 50) {
         emit error_bad_stl();
         return NULL;
     }
@@ -145,21 +157,27 @@ Mesh* Loader::read_stl_binary(QFile& file)
     // Extract vertices into an array of xyz, unsigned pairs
     QVector<Vertex> verts(tri_count * 3);
 
-    // Dummy array, because readRawData is faster than skipRawData
-    std::unique_ptr<uint8_t[]> buffer(new uint8_t[tri_count * 50]);
-    data.readRawData((char*)buffer.get(), tri_count * 50);
-
-    // Store vertices in the array, processing one triangle at a time.
-    auto b = buffer.get() + 3 * sizeof(float);
-    for (auto v = verts.begin(); v != verts.end(); v += 3) {
-        // Load vertex data from .stl file into vertices
-        for (unsigned i = 0; i < 3; ++i) {
-            qFromLittleEndian<float>(b, 3, &v[i]);
-            b += 3 * sizeof(float);
+    // Stream the body in modest chunks rather than buffering the whole
+    // file: at 50 bytes per triangle a full copy would briefly double the
+    // memory footprint of multi-million-triangle models.
+    constexpr uint32_t chunk_tris = 16384; // 800 KB buffer
+    std::unique_ptr<uint8_t[]> buffer(new uint8_t[chunk_tris * 50]);
+    Vertex* v = verts.data();
+    for (uint32_t remaining = tri_count; remaining > 0;) {
+        const uint32_t n = std::min(remaining, chunk_tris);
+        if (data.readRawData((char*)buffer.get(), n * 50) != int(n * 50)) {
+            emit error_bad_stl();
+            return NULL;
         }
-
-        // Skip face attribute and next face's normal vector
-        b += 3 * sizeof(float) + sizeof(uint16_t);
+        for (uint32_t i = 0; i < n; ++i) {
+            // Each 50-byte record: 12-byte normal, 3 vertices, 2-byte attribute
+            const uint8_t* b = buffer.get() + i * 50 + 3 * sizeof(float);
+            for (unsigned j = 0; j < 3; ++j) {
+                qFromLittleEndian<float>(b, 3, v++);
+                b += 3 * sizeof(float);
+            }
+        }
+        remaining -= n;
     }
 
     return mesh_from_verts(tri_count, verts);
@@ -169,7 +187,10 @@ Mesh* Loader::read_stl_ascii(QFile& file)
 {
     file.readLine();
     uint32_t tri_count = 0;
-    QVector<Vertex> verts(tri_count * 3);
+    QVector<Vertex> verts;
+    // An ASCII facet runs ~250 bytes for its 3 vertices; reserving up
+    // front avoids repeated reallocation on large files
+    verts.reserve(qMin<qint64>(file.size() / 250, 20 * 1000 * 1000) * 3);
 
     bool okay = true;
     while (!file.atEnd() && okay) {
@@ -182,14 +203,18 @@ Mesh* Loader::read_stl_ascii(QFile& file)
         }
 
         for (int i = 0; i < 3; ++i) {
-            auto line = file.readLine().simplified().split(' ');
-            if (line[0] != "vertex") {
+            const auto line = file.readLine().simplified().split(' ');
+            if (line.size() < 4 || line[0] != "vertex") {
                 okay = false;
                 break;
             }
-            const float x = line[1].toFloat(&okay);
-            const float y = line[2].toFloat(&okay);
-            const float z = line[3].toFloat(&okay);
+            bool ok_x, ok_y, ok_z;
+            const float x = line[1].toFloat(&ok_x);
+            const float y = line[2].toFloat(&ok_y);
+            const float z = line[3].toFloat(&ok_z);
+            if (!(okay = ok_x && ok_y && ok_z)) {
+                break;
+            }
             verts.push_back(Vertex(x, y, z));
         }
         if (!file.readLine().trimmed().startsWith("endloop") || !file.readLine().trimmed().startsWith("endfacet")) {

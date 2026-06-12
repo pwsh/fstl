@@ -1,3 +1,5 @@
-build/*
+build/
+build-*/
+dist-windows/
 *.pro.user
 *.qmake.stash

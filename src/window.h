@@ -6,7 +6,10 @@
 #include <QFileSystemWatcher>
 #include <QMainWindow>
 
+#include "keybindingsdialog.h"
+
 class Canvas;
+class RotationAnimationDialog;
 class ShaderLightPrefs;
 
 class Window : public QMainWindow
@@ -21,8 +24,7 @@ public:
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
-    void resizeEvent(QResizeEvent* event) override;
-    void moveEvent(QMoveEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
 public slots:
@@ -52,6 +54,14 @@ private slots:
     void on_load_recent(QAction* a);
     void on_loaded(const QString& filename);
     void on_save_screenshot();
+    void on_export_png_rotation();
+    void on_export_gif_rotation();
+    void on_export_mp4_rotation();
+    void on_export_settings();
+    void on_import_settings();
+    void on_animate_dialog();
+    void on_keybindings();
+    void on_help_usage();
     void on_fullscreen();
     void on_hide_menuBar();
     void on_drawModePrefs();
@@ -87,6 +97,15 @@ private:
     QAction* const reload_action;
     QAction* const autoreload_action;
     QAction* const save_screenshot_action;
+    QAction* const export_png_rotation_action;
+    QAction* const export_gif_rotation_action;
+    QAction* const export_mp4_rotation_action;
+    QAction* const export_settings_action;
+    QAction* const import_settings_action;
+    QAction* const momentum_spin_action;
+    QAction* const animate_action;
+    QAction* const keybindings_action;
+    QAction* const help_usage_action;
     QAction* const hide_menuBar_action;
     QAction* const fullscreen_action;
     QAction* const resetTransformOnLoadAction;
@@ -104,6 +123,7 @@ private:
     const static QString DRAW_MODE_KEY;
     const static QString WINDOW_GEOM_KEY;
     const static QString RESET_TRANSFORM_ON_LOAD_KEY;
+    const static QString MOMENTUM_KEY;
 
     QString current_file;
     QString lookup_folder;
@@ -114,6 +134,12 @@ private:
     Canvas* canvas;
 
     ShaderLightPrefs* meshlightprefs;
+    RotationAnimationDialog* animateDialog;
+
+    /*  User-rebindable shortcuts (file navigation, movement, common
+     *  operations); edited via View > Configure Keyboard Shortcuts */
+    void setup_bindable_actions();
+    QList<BindableAction> bindable_actions;
 };
 
 #endif // WINDOW_H

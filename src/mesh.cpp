@@ -1,8 +1,4 @@
-#include <QDataStream>
-#include <QFile>
-#include <QVector3D>
-
-#include <cmath>
+#include <algorithm>
 
 #include "mesh.h"
 
@@ -19,8 +15,8 @@ float Mesh::min(size_t start) const
         return -1;
     }
     float v = vertices[start];
-    for (size_t i = start; i < vertices.size(); i += 3) {
-        v = fmin(v, vertices[i]);
+    for (size_t i = start + 3; i < vertices.size(); i += 3) {
+        v = std::min(v, vertices[i]);
     }
     return v;
 }
@@ -31,8 +27,8 @@ float Mesh::max(size_t start) const
         return 1;
     }
     float v = vertices[start];
-    for (size_t i = start; i < vertices.size(); i += 3) {
-        v = fmax(v, vertices[i]);
+    for (size_t i = start + 3; i < vertices.size(); i += 3) {
+        v = std::max(v, vertices[i]);
     }
     return v;
 }

@@ -7,9 +7,16 @@
 
 App::App(int& argc, char* argv[]) : QApplication(argc, argv), window(new Window())
 {
-    if (argc > 1) {
-        const auto args = QCoreApplication::arguments();
-        QString filename = args.at(1);
+    // First positional (non-flag) argument is the file to open
+    QString filename;
+    const auto args = QCoreApplication::arguments();
+    for (int i = 1; i < args.size(); ++i) {
+        if (!args.at(i).startsWith('-')) {
+            filename = args.at(i);
+            break;
+        }
+    }
+    if (!filename.isEmpty()) {
         if (filename.startsWith("~")) {
             filename.replace(0, 1, QDir::homePath());
         }
