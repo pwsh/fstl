@@ -247,11 +247,11 @@ private:
     int statisticsFlags = 0;
     QVector3D meshLower, meshUpper; // bounding box of the loaded mesh
     int meshTriCount = 0;
-    QElapsedTimer frameClock; // dt between paints, for fps and rot speed
+    QElapsedTimer frameClock; // dt between paints, for fps
     float fpsValue = 0;
-    bool hasPrevOrient = false;
-    QMatrix4x4 prevOrient;
-    QVector3D angVelDeg; // angular velocity (deg/s) in view space
+    QElapsedTimer velClock;   // fixed window for a steady rotation-speed reading
+    QMatrix4x4 velRefOrient;  // orientation at the start of the window
+    QVector3D angVelDeg;      // angular velocity (deg/s) in view space
 };
 
 #endif // CANVAS_H

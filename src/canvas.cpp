@@ -242,39 +242,47 @@ void Canvas::setStatFlags(int flags)
 {
     statisticsFlags = flags;
     frameClock.invalidate();
-    hasPrevOrient = false;
+    velClock.invalidate();
     fpsValue = 0;
-    update(); // also kicks the live-fps render loop when StatFps is set
+    angVelDeg = QVector3D();
+    update(); // also kicks the live render loop for fps / rotation speed
 }
 
 void Canvas::updateFrameStats()
 {
-    // Time since the previous paint
-    double dt = 0;
+    // FPS from the interval between consecutive paints
     if (frameClock.isValid()) {
-        dt = frameClock.nsecsElapsed() / 1e9;
+        const double dt = frameClock.nsecsElapsed() / 1e9;
+        if (dt > 1e-5 && dt < 1.0) {
+            const float inst = float(1.0 / dt);
+            fpsValue = (fpsValue > 0) ? (fpsValue * 0.9f + inst * 0.1f) : inst;
+        }
     }
     frameClock.restart();
 
-    if (dt > 1e-5 && dt < 1.0) {
-        const float inst = float(1.0 / dt);
-        fpsValue = (fpsValue > 0) ? (fpsValue * 0.9f + inst * 0.1f) : inst;
-
-        // Angular velocity from the change in orientation
-        if (hasPrevOrient) {
+    // Angular velocity is averaged over a fixed window rather than per
+    // paint, so the reading stays steady regardless of how often paints
+    // happen relative to rotation updates (otherwise it bounces between
+    // 0 and the speed).
+    if (!velClock.isValid()) {
+        velClock.start();
+        velRefOrient = currentTransform;
+    } else {
+        const double elapsed = velClock.nsecsElapsed() / 1e9;
+        if (elapsed >= 0.25) {
             const QQuaternion now = QQuaternion::fromRotationMatrix(currentTransform.toGenericMatrix<3, 3>());
-            const QQuaternion prev = QQuaternion::fromRotationMatrix(prevOrient.toGenericMatrix<3, 3>());
+            const QQuaternion ref = QQuaternion::fromRotationMatrix(velRefOrient.toGenericMatrix<3, 3>());
             QVector3D axis;
             float angle = 0;
-            (now * prev.conjugated()).normalized().getAxisAndAngle(&axis, &angle);
+            (now * ref.conjugated()).normalized().getAxisAndAngle(&axis, &angle);
             if (angle > 180.0f) {
                 angle -= 360.0f; // shortest arc
             }
-            angVelDeg = axis * float(angle / dt);
+            angVelDeg = axis * float(angle / elapsed);
+            velRefOrient = currentTransform;
+            velClock.restart();
         }
     }
-    prevOrient = currentTransform;
-    hasPrevOrient = true;
 }
 
 QString Canvas::statisticsText() const
@@ -466,8 +474,10 @@ void Canvas::paintGL()
         painter.drawText(QRect(10, textHeight, width(), height()), statisticsText());
     painter.drawText(10, height() - textHeight, status);
 
-    // Keep rendering while FPS is shown so the reading stays live
-    if (statisticsFlags & StatFps) {
+    // Keep rendering while a time-based stat is shown so the reading
+    // stays live (FPS, and rotation speed so it drops to 0 when motion
+    // stops rather than freezing at the last value).
+    if (statisticsFlags & (StatFps | StatRotationSpeed)) {
         update();
     }
 }
