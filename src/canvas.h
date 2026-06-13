@@ -221,10 +221,13 @@ private:
     // Momentum spin state
     bool momentumEnabled = false;
     QTimer spin_timer;
-    QElapsedTimer spin_clock;  // dt between spin ticks
-    QElapsedTimer drag_clock;  // dt between drag steps
-    QVector3D last_drag_axis;  // view-space
-    float last_drag_speed = 0; // deg/s
+    QElapsedTimer spin_clock;     // dt between spin ticks
+    QElapsedTimer drag_clock;     // recency of the last drag step
+    QVector3D last_drag_axis;     // view-space trajectory of the last drag step
+    bool last_drag_valid = false; // a real drag movement was captured
+    // Momentum spins at this fixed speed (deg/s), not the flick velocity,
+    // so every release continues at the same consistent rate.
+    float momentumSpeed = 60.0f;
 
     QVector3D center, default_center;
     float scale, default_scale;

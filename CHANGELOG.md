@@ -545,6 +545,17 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### Momentum spin uses a fixed speed
+
+- **Static momentum speed** - `src/canvas.{h,cpp}`: releasing a drag with
+  Momentum Spin enabled previously continued at the flick velocity
+  (`angle / dt` at the instant of release), so the spin rate varied with
+  how fast the mouse happened to be moving. It now spins at a fixed
+  internal speed (`momentumSpeed`, 60 deg/s) along the drag's trajectory
+  - the direction still follows the drag, but the speed is consistent
+  every time. Verified: a slow flick and a 10x-faster flick both spin at
+  ~60 deg/s.
+
 ### View > Statistics overlay
 
 - **Decoupled the info text from Draw Axes** - `src/canvas.{h,cpp}`:

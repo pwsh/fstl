@@ -96,7 +96,7 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     connect(&spin_timer, &QTimer::timeout, this, [this] {
         const float dt = spin_clock.restart() / 1000.0f;
         QMatrix4x4 r;
-        r.rotate(last_drag_speed * dt, last_drag_axis);
+        r.rotate(momentumSpeed * dt, last_drag_axis);
         currentTransform = r * currentTransform;
         update();
     });
@@ -593,7 +593,7 @@ void Canvas::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
         stopSpin();
-        last_drag_speed = 0;
+        last_drag_valid = false;
         drag_clock.invalidate();
         mouse_pos = mouse_position(event);
         setCursor(Qt::ClosedHandCursor);
@@ -605,11 +605,11 @@ void Canvas::mouseReleaseEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
         unsetCursor();
     }
-    // Keep spinning with the drag's velocity if the release came straight
-    // out of an active drag (not after the mouse stopped moving)
-    if (event->button() == Qt::LeftButton && momentumEnabled && drag_clock.isValid() &&
-        drag_clock.elapsed() < 150 && last_drag_speed > 30.0f) {
-        last_drag_speed = std::min(last_drag_speed, 720.0f);
+    // Continue spinning at the fixed momentum speed, along the drag's
+    // trajectory, if the release came straight out of an active drag
+    // (not after the mouse stopped moving).
+    if (event->button() == Qt::LeftButton && momentumEnabled && last_drag_valid && drag_clock.isValid() &&
+        drag_clock.elapsed() < 150) {
         spin_clock.start();
         spin_timer.start();
     }
@@ -679,15 +679,14 @@ void Canvas::calcArcballTransform(QPointF p1, QPointF p2)
     // calc angle
     double angle = acos(std::min(1.0f, QVector3D::dotProduct(v1, v2))) * 180.0 / M_PI;
 
-    // Track angular velocity for momentum spin
-    if (drag_clock.isValid()) {
-        const double dt = drag_clock.nsecsElapsed() / 1e9;
-        if (dt > 1e-4 && angle > 0) {
-            last_drag_speed = angle / dt;
-            last_drag_axis = v1xv2.normalized();
-        }
+    // Remember the drag trajectory (axis) for momentum spin and mark the
+    // movement as recent. The spin speed itself is a fixed internal value
+    // (momentumSpeed), not derived from how fast the mouse was moving.
+    if (angle > 1e-3) {
+        last_drag_axis = v1xv2.normalized();
+        last_drag_valid = true;
+        drag_clock.restart();
     }
-    drag_clock.restart();
 
     // apply transform
     currentTransform.rotate(angle, v1xv2Obj);
