@@ -92,6 +92,9 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
 
     anim.setDuration(100);
 
+    stats_refresh_timer.setInterval(33); // ~30 Hz live fps/rotation readout
+    connect(&stats_refresh_timer, &QTimer::timeout, this, [this] { update(); });
+
     spin_timer.setInterval(16);
     connect(&spin_timer, &QTimer::timeout, this, [this] {
         const float dt = spin_clock.restart() / 1000.0f;
@@ -245,7 +248,15 @@ void Canvas::setStatFlags(int flags)
     velClock.invalidate();
     fpsValue = 0;
     angVelDeg = QVector3D();
-    update(); // also kicks the live render loop for fps / rotation speed
+
+    // FPS and rotation speed need a live readout; refresh at a bounded
+    // rate rather than repainting as fast as possible.
+    if (flags & (StatFps | StatRotationSpeed)) {
+        stats_refresh_timer.start();
+    } else {
+        stats_refresh_timer.stop();
+    }
+    update();
 }
 
 void Canvas::updateFrameStats()
@@ -474,12 +485,6 @@ void Canvas::paintGL()
         painter.drawText(QRect(10, textHeight, width(), height()), statisticsText());
     painter.drawText(10, height() - textHeight, status);
 
-    // Keep rendering while a time-based stat is shown so the reading
-    // stays live (FPS, and rotation speed so it drops to 0 when motion
-    // stops rather than freezing at the last value).
-    if (statisticsFlags & (StatFps | StatRotationSpeed)) {
-        update();
-    }
 }
 
 void Canvas::draw_mesh()

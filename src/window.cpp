@@ -278,8 +278,8 @@ Window::Window(QWidget* parent) :
     this->addAction(fullscreen_action);
 
     animateDialog = new RotationAnimationDialog(this, canvas);
-    // Applies the persisted statistics selection to the canvas on creation
-    statisticsDialog = new StatisticsDialog(this, canvas);
+    // Restore the persisted statistics overlay without needing the dialog
+    StatisticsDialog::applySaved(canvas);
 
     setup_bindable_actions();
 
@@ -346,11 +346,17 @@ void Window::load_persist_settings()
 
 void Window::on_statistics_dialog()
 {
-    if (statisticsDialog->isVisible()) {
-        statisticsDialog->hide();
-    } else {
-        statisticsDialog->show();
+    // Created fresh each time (like the Usage dialog) rather than kept as
+    // a hidden-then-reshown window; reuse the open one if present.
+    auto existing = findChild<StatisticsDialog*>();
+    if (existing) {
+        existing->raise();
+        existing->activateWindow();
+        return;
     }
+    auto dialog = new StatisticsDialog(this, canvas);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
 }
 
 void Window::setup_bindable_actions()

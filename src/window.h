@@ -140,7 +140,6 @@ private:
 
     ShaderLightPrefs* meshlightprefs;
     RotationAnimationDialog* animateDialog;
-    StatisticsDialog* statisticsDialog;
 
     /*  User-rebindable shortcuts (file navigation, movement, common
      *  operations); edited via View > Configure Keyboard Shortcuts */

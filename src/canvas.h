@@ -250,7 +250,8 @@ private:
     int statisticsFlags = 0;
     QVector3D meshLower, meshUpper; // bounding box of the loaded mesh
     int meshTriCount = 0;
-    QElapsedTimer frameClock; // dt between paints, for fps
+    QTimer stats_refresh_timer; // ~30 Hz repaint while a live stat is shown
+    QElapsedTimer frameClock;   // dt between paints, for fps
     float fpsValue = 0;
     QElapsedTimer velClock;   // fixed window for a steady rotation-speed reading
     QMatrix4x4 velRefOrient;  // orientation at the start of the window

@@ -4,10 +4,10 @@
 #include <QDialog>
 #include <QList>
 #include <QPair>
+#include <QString>
 
 class Canvas;
 class QCheckBox;
-class QGroupBox;
 
 /*  Chooses which statistics to overlay on the viewport. A master switch
  *  enables/disables the whole overlay; the individual items below select
@@ -18,16 +18,20 @@ class StatisticsDialog : public QDialog
 public:
     StatisticsDialog(QWidget* parent, Canvas* canvas);
 
+    /*  Pushes the persisted statistics selection to the canvas. Called
+     *  once at startup so the overlay state is restored even if the
+     *  dialog is never opened. */
+    static void applySaved(Canvas* canvas);
+
+    static const QString ENABLED_KEY;
+    static const QString ITEMS_KEY;
+
 private:
     void apply(); // recompute flags, push to the canvas, and persist
 
     Canvas* canvas;
     QCheckBox* enableBox;
-    QGroupBox* itemsBox;
     QList<QPair<QCheckBox*, int>> items;
-
-    static const QString ENABLED_KEY;
-    static const QString ITEMS_KEY;
 };
 
 #endif // STATISTICSDIALOG_H

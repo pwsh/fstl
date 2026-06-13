@@ -545,6 +545,25 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### Statistics dialog: avoid the "fstl is ready" notification
+
+- The earlier terminal-only-fork change did not fix it: the popup is
+  gnome-shell's internal window-attention handler, fired on the native
+  Wayland menu-click activation path (not reproducible programmatically
+  or via D-Bus). It was unique to the Statistics dialog. To eliminate
+  every way that dialog differed from the dialogs that do not trigger it
+  (`src/statisticsdialog.{h,cpp}`, `src/window.{h,cpp}`): the dialog is
+  now created fresh on demand (WA_DeleteOnClose, like the Usage dialog)
+  instead of kept as a hidden-then-reshown window; it no longer touches
+  the canvas in its constructor (the persisted overlay is restored at
+  startup via `StatisticsDialog::applySaved()`); and the `QGroupBox`
+  wrapper was removed in favor of a plain checkbox list.
+- **Bounded the live stats repaint** - `src/canvas.{h,cpp}`: FPS and
+  rotation-speed previously kept the canvas repainting as fast as
+  possible (an unbounded `update()` loop). It now refreshes on a ~30 Hz
+  timer while those stats are shown - much lighter, and avoids a
+  continuous render loop that could interfere with compositor focus.
+
 ### Fix: spurious "fstl is ready" desktop notification
 
 - **Only fork-detach when launched from a terminal** - `src/main.cpp`:
