@@ -58,6 +58,15 @@ picker that applies to every draw mode. **Configure Keyboard Shortcuts...**
 rebinds file navigation (Left/Right), keyboard movement (W/A/S/D rotate,
 Q/E roll, Shift+W/A/S/D pan, +/- zoom), and the common operations.
 
+**View > Statistics** overlays selectable figures on the viewport -
+triangle count, bounding box, model size, orientation, rotation speed,
+frame rate, zoom/projection, draw mode, colors, and lighting - each
+toggled independently. All are off by default. (Previously this info was
+tied to Draw Axes; Draw Axes now shows only the 3D axes and the corner
+orientation hud.)
+
+![Statistics overlay](docs/images/statistics.png)
+
 **View > Up Axis** chooses whether the viewpoint presets treat **Z** (the
 STL / 3D-printing default) or **Y** as the model's up axis. The STL format
 stores no up-axis, so a model authored Y-up (common from some

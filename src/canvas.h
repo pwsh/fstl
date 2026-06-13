@@ -21,6 +21,20 @@ class Axis;
 enum ViewPoint { centerview, isoview, topview, bottomview, leftview, rightview, frontview, backview };
 enum DrawMode { shaded, wireframe, surfaceangle, meshlight, DRAWMODECOUNT };
 
+/*  Individually-toggleable on-screen statistics (bit flags). */
+enum StatFlag {
+    StatTriangles = 1 << 0,
+    StatBoundingBox = 1 << 1,
+    StatModelSize = 1 << 2,
+    StatOrientation = 1 << 3,
+    StatRotationSpeed = 1 << 4,
+    StatFps = 1 << 5,
+    StatZoomProjection = 1 << 6,
+    StatDrawMode = 1 << 7,
+    StatColors = 1 << 8,
+    StatLighting = 1 << 9,
+};
+
 class Canvas : public QOpenGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
@@ -43,6 +57,10 @@ public:
      *  false = Z-up (STL/3D-printing default), true = Y-up. */
     bool upAxisIsY() const;
     void setUpAxisIsY(bool yUp);
+
+    /*  Bitmask of StatFlag values to show as an on-screen overlay. */
+    int statFlags() const;
+    void setStatFlags(int flags);
 
     QColor getAmbientColor();
     void setAmbientColor(QColor c);
@@ -148,6 +166,8 @@ private:
     QMatrix4x4 view_matrix() const;
     void resetTransform();
     void applyUpAxis(QMatrix4x4& m) const;
+    void updateFrameStats();      // refresh fps and angular velocity
+    QString statisticsText() const;
     QPointF changeMouseCoordinates(QPoint p);
     void calcArcballTransform(QPointF p1, QPointF p2);
 
@@ -222,7 +242,16 @@ private:
 
     QPoint mouse_pos;
     QString status;
-    QString meshInfo;
+
+    // Statistics overlay
+    int statisticsFlags = 0;
+    QVector3D meshLower, meshUpper; // bounding box of the loaded mesh
+    int meshTriCount = 0;
+    QElapsedTimer frameClock; // dt between paints, for fps and rot speed
+    float fpsValue = 0;
+    bool hasPrevOrient = false;
+    QMatrix4x4 prevOrient;
+    QVector3D angVelDeg; // angular velocity (deg/s) in view space
 };
 
 #endif // CANVAS_H

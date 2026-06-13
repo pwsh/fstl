@@ -142,6 +142,13 @@ private:
      *  operations); edited via View > Configure Keyboard Shortcuts */
     void setup_bindable_actions();
     QList<BindableAction> bindable_actions;
+
+    /*  View > Statistics overlay items, each a checkable action mapped
+     *  to a StatFlag bit. */
+    void setup_statistics_menu(QMenu* view_menu);
+    QList<QPair<QAction*, int>> stat_actions;
+    void apply_stat_flags();
+    static const QString STATISTICS_KEY;
 };
 
 #endif // WINDOW_H

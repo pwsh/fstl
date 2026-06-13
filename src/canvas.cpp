@@ -1,6 +1,7 @@
 #include <QFile>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QQuaternion>
 #include <QSettings>
 
 #include <cmath>
@@ -44,7 +45,7 @@ const float Canvas::defaultDirectiveFactor = 0.5;
 const int Canvas::defaultCurrentLightDirection = 1;
 
 Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
-    QOpenGLWidget(parent), scale(1), zoom(1), anim(this, "perspective"), status(" "), meshInfo("")
+    QOpenGLWidget(parent), scale(1), zoom(1), anim(this, "perspective"), status(" ")
 {
     setFormat(format);
     QFile styleFile(":/qt/style.qss");
@@ -232,6 +233,112 @@ void Canvas::setUpAxisIsY(bool yUp)
     update();
 }
 
+int Canvas::statFlags() const
+{
+    return statisticsFlags;
+}
+
+void Canvas::setStatFlags(int flags)
+{
+    statisticsFlags = flags;
+    frameClock.invalidate();
+    hasPrevOrient = false;
+    fpsValue = 0;
+    update(); // also kicks the live-fps render loop when StatFps is set
+}
+
+void Canvas::updateFrameStats()
+{
+    // Time since the previous paint
+    double dt = 0;
+    if (frameClock.isValid()) {
+        dt = frameClock.nsecsElapsed() / 1e9;
+    }
+    frameClock.restart();
+
+    if (dt > 1e-5 && dt < 1.0) {
+        const float inst = float(1.0 / dt);
+        fpsValue = (fpsValue > 0) ? (fpsValue * 0.9f + inst * 0.1f) : inst;
+
+        // Angular velocity from the change in orientation
+        if (hasPrevOrient) {
+            const QQuaternion now = QQuaternion::fromRotationMatrix(currentTransform.toGenericMatrix<3, 3>());
+            const QQuaternion prev = QQuaternion::fromRotationMatrix(prevOrient.toGenericMatrix<3, 3>());
+            QVector3D axis;
+            float angle = 0;
+            (now * prev.conjugated()).normalized().getAxisAndAngle(&axis, &angle);
+            if (angle > 180.0f) {
+                angle -= 360.0f; // shortest arc
+            }
+            angVelDeg = axis * float(angle / dt);
+        }
+    }
+    prevOrient = currentTransform;
+    hasPrevOrient = true;
+}
+
+QString Canvas::statisticsText() const
+{
+    const char* drawModeNames[] = {"Shaded", "Wireframe", "Surface Angle", "Light Source"};
+    QStringList lines;
+
+    if (statisticsFlags & StatTriangles) {
+        lines << QStringLiteral("Triangles: %1").arg(meshTriCount);
+    }
+    if (statisticsFlags & StatBoundingBox) {
+        lines << QStringLiteral("Bounds X:[%1, %2] Y:[%3, %4] Z:[%5, %6]")
+                     .arg(meshLower.x(), 0, 'f', 2)
+                     .arg(meshUpper.x(), 0, 'f', 2)
+                     .arg(meshLower.y(), 0, 'f', 2)
+                     .arg(meshUpper.y(), 0, 'f', 2)
+                     .arg(meshLower.z(), 0, 'f', 2)
+                     .arg(meshUpper.z(), 0, 'f', 2);
+    }
+    if (statisticsFlags & StatModelSize) {
+        const QVector3D s = meshUpper - meshLower;
+        lines << QStringLiteral("Size: %1 x %2 x %3").arg(s.x(), 0, 'f', 2).arg(s.y(), 0, 'f', 2).arg(s.z(), 0, 'f', 2);
+    }
+    if (statisticsFlags & StatOrientation) {
+        const QQuaternion q = QQuaternion::fromRotationMatrix(currentTransform.toGenericMatrix<3, 3>());
+        QVector3D e = q.toEulerAngles(); // pitch, yaw, roll (degrees)
+        lines << QStringLiteral("Orientation: pitch %1  yaw %2  roll %3")
+                     .arg(e.x(), 0, 'f', 1)
+                     .arg(e.y(), 0, 'f', 1)
+                     .arg(e.z(), 0, 'f', 1);
+    }
+    if (statisticsFlags & StatRotationSpeed) {
+        lines << QStringLiteral("Rotation: X %1  Y %2  Z %3 deg/s")
+                     .arg(angVelDeg.x(), 0, 'f', 1)
+                     .arg(angVelDeg.y(), 0, 'f', 1)
+                     .arg(angVelDeg.z(), 0, 'f', 1);
+    }
+    if (statisticsFlags & StatFps) {
+        lines << QStringLiteral("FPS: %1").arg(qRound(fpsValue));
+    }
+    if (statisticsFlags & StatZoomProjection) {
+        lines << QStringLiteral("Zoom: %1x   %2")
+                     .arg(zoom, 0, 'f', 2)
+                     .arg(perspective > 0 ? "Perspective" : "Orthographic");
+    }
+    if (statisticsFlags & StatDrawMode) {
+        lines << QStringLiteral("Draw mode: %1").arg(drawModeNames[drawMode]);
+    }
+    if (statisticsFlags & StatColors) {
+        const QColor amb = animModelColor.isValid() ? animModelColor : ambientColor;
+        const QColor dir = animLightColor.isValid() ? animLightColor : directiveColor;
+        lines << QStringLiteral("Colors: model %1  light %2  opacity %3")
+                     .arg(amb.name(), dir.name())
+                     .arg((animModelOpacity >= 0 ? animModelOpacity : modelOpacity), 0, 'f', 2);
+    }
+    if (statisticsFlags & StatLighting) {
+        const QString dirName = (currentLightDirection >= 0 && currentLightDirection < nameDir.size())
+                                    ? nameDir.at(currentLightDirection)
+                                    : QStringLiteral("custom");
+        lines << QStringLiteral("Lighting: brightness %1  direction %2").arg(lightBrightness, 0, 'f', 2).arg(dirName);
+    }
+    return lines.join('\n');
+}
+
 void Canvas::resetTransform()
 {
     currentTransform = defaultOrientation();
@@ -262,9 +369,9 @@ void Canvas::load_mesh(Mesh* m, bool is_reload)
             resetTransform();
         }
     }
-    meshInfo = QStringLiteral("Triangles: %1\nX: [%2, %3]\nY: [%4, %5]\nZ: [%6, %7]").arg(m->triCount());
-    for (int dIdx = 0; dIdx < 3; dIdx++)
-        meshInfo = meshInfo.arg(lower[dIdx]).arg(upper[dIdx]);
+    meshLower = lower;
+    meshUpper = upper;
+    meshTriCount = m->triCount();
     // The mesh can finish loading before the first paint initializes GL
     if (axis) {
         axis->setScale(lower, upper);
@@ -347,12 +454,22 @@ void Canvas::paintGL()
     if (hideHud) {
         return; // exports should not include text overlays
     }
+
+    if (statisticsFlags) {
+        updateFrameStats();
+    }
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     float textHeight = painter.fontInfo().pointSize();
-    if (drawAxes)
-        painter.drawText(QRect(10, textHeight, width(), height()), meshInfo);
+    if (statisticsFlags && mesh)
+        painter.drawText(QRect(10, textHeight, width(), height()), statisticsText());
     painter.drawText(10, height() - textHeight, status);
+
+    // Keep rendering while FPS is shown so the reading stays live
+    if (statisticsFlags & StatFps) {
+        update();
+    }
 }
 
 void Canvas::draw_mesh()

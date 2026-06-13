@@ -72,6 +72,25 @@ int main(int argc, char* argv[])
         printf("wrote %s/interface.png (%dx%d)\n", qPrintable(outDir), shot.width(), shot.height());
     }
 
+    // Same window with a representative statistics overlay enabled
+    if (auto canvasWidget = window.findChild<Canvas*>()) {
+        canvasWidget->setStatFlags(StatTriangles | StatBoundingBox | StatModelSize | StatOrientation | StatFps |
+                                   StatZoomProjection | StatDrawMode | StatColors | StatLighting);
+        for (int i = 0; i < 6; ++i) {
+            qApp->processEvents();
+            QThread::msleep(40);
+        }
+        QPixmap st = window.grab();
+        const QImage gl = canvasWidget->grabFramebuffer();
+        QPainter p(&st);
+        p.drawImage(QRect(canvasWidget->mapTo(&window, QPoint(0, 0)), canvasWidget->size()), gl);
+        p.end();
+        if (st.save(outDir + "/statistics.png")) {
+            printf("wrote %s/statistics.png (%dx%d)\n", qPrintable(outDir), st.width(), st.height());
+        }
+        canvasWidget->setStatFlags(0);
+    }
+
     // --- Top-level menus ---
     const auto bar = window.menuBar();
     for (QAction* a : bar->actions()) {

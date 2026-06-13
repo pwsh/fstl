@@ -545,6 +545,21 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### View > Statistics overlay
+
+- **Decoupled the info text from Draw Axes** - `src/canvas.{h,cpp}`:
+  Draw Axes previously also drew the triangle count and bounding box as a
+  text overlay. It now shows only the 3D axes and the corner orientation
+  hud.
+- **New View > Statistics submenu** - `src/window.{h,cpp}`,
+  `src/canvas.{h,cpp}`: ten independently-toggleable readouts, all off by
+  default and persisted - triangle count, bounding box, model size,
+  orientation (pitch/yaw/roll), rotation speed (per-axis deg/s derived
+  from frame-to-frame orientation change), frame rate (with a live render
+  loop while shown), zoom/projection, draw mode, colors (model/light/
+  opacity, honoring animation overrides), and lighting (brightness +
+  direction). Rendered as a top-left overlay and excluded from exports.
+
 ### View > Up Axis toggle
 
 - **Z-up / Y-up viewpoint convention** - `src/canvas.{h,cpp}`,
