@@ -37,6 +37,7 @@ const QString Canvas::BACKGROUND_COLOR = "backgroundColor";
 const QString Canvas::LIGHT_BRIGHTNESS = "lightBrightness";
 const QString Canvas::MODEL_OPACITY = "modelOpacity";
 const QString Canvas::UP_AXIS_IS_Y = "upAxisIsY";
+const QString Canvas::MOMENTUM_SPEED = "momentumSpeed";
 
 const QColor Canvas::defaultAmbientColor = QColor::fromRgbF(0.22, 0.8, 1.0);
 const QColor Canvas::defaultDirectiveColor = QColor(255, 255, 255);
@@ -62,6 +63,7 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     lightBrightness = settings.value(LIGHT_BRIGHTNESS, 1.0).toFloat();
     modelOpacity = settings.value(MODEL_OPACITY, 1.0).toFloat();
     yUpAxis = settings.value(UP_AXIS_IS_Y, false).toBool();
+    momentumSpeed = settings.value(MOMENTUM_SPEED, 360.0).toFloat();
 
     // Read the up-axis preference before establishing the initial view
     resetTransform();
@@ -626,6 +628,17 @@ void Canvas::setMomentumEnabled(bool enabled)
     if (!enabled) {
         stopSpin();
     }
+}
+
+double Canvas::getMomentumSpeed() const
+{
+    return momentumSpeed;
+}
+
+void Canvas::setMomentumSpeed(double degPerSec)
+{
+    momentumSpeed = float(degPerSec);
+    QSettings().setValue(MOMENTUM_SPEED, degPerSec);
 }
 
 void Canvas::stopSpin()

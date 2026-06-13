@@ -585,6 +585,15 @@ the object (X/Y still default to -1..1).
   default); items are greyed out while it is off but keep their
   selection. Applies live and persists (statistics/enabled + items).
 
+### Momentum spin speed is configurable
+
+- The fixed momentum speed (60 deg/s) was much slower than the old
+  flick-based spin could reach, so fast spins were no longer possible.
+  The speed is still static (not derived from the flick) but is now
+  adjustable and persisted via **View > Momentum Spin > Speed** with
+  presets Slow (90), Medium (180), Fast (360, the new default), and Very
+  fast (720 - the old maximum). `src/canvas.{h,cpp}`, `src/window.cpp`.
+
 ### Momentum spin uses a fixed speed
 
 - **Static momentum speed** - `src/canvas.{h,cpp}`: releasing a drag with

@@ -121,6 +121,10 @@ public:
     void setMomentumEnabled(bool enabled);
     void stopSpin();
 
+    /*  Fixed momentum-spin speed (deg/s) applied on drag release. */
+    double getMomentumSpeed() const;
+    void setMomentumSpeed(double degPerSec);
+
     /*  Continuous-rotation animation support.  Angles are absolute and
      *  applied on top of a fixed base orientation - by default the reset
      *  orientation, so identical inputs reproduce identical results.
@@ -210,6 +214,7 @@ private:
     const static QString LIGHT_BRIGHTNESS;
     const static QString MODEL_OPACITY;
     const static QString UP_AXIS_IS_Y;
+    const static QString MOMENTUM_SPEED;
 
     std::unique_ptr<GLMesh> mesh;
     std::unique_ptr<Backdrop> backdrop;
@@ -226,8 +231,9 @@ private:
     QVector3D last_drag_axis;     // view-space trajectory of the last drag step
     bool last_drag_valid = false; // a real drag movement was captured
     // Momentum spins at this fixed speed (deg/s), not the flick velocity,
-    // so every release continues at the same consistent rate.
-    float momentumSpeed = 60.0f;
+    // so every release continues at the same consistent rate. Persisted
+    // and adjustable (View > Momentum Spin > Speed).
+    float momentumSpeed = 360.0f;
 
     QVector3D center, default_center;
     float scale, default_scale;

@@ -251,13 +251,38 @@ Window::Window(QWidget* parent) :
     resetTransformOnLoadAction->setCheckable(true);
     QObject::connect(resetTransformOnLoadAction, &QAction::triggered, this, &Window::on_resetTransformOnLoad);
 
-    view_menu->addAction(momentum_spin_action);
+    const auto momentum_menu = view_menu->addMenu("Momentum &Spin");
+    momentum_menu->addAction(momentum_spin_action);
     momentum_spin_action->setCheckable(true);
     momentum_spin_action->setToolTip("Release a drag to keep the model spinning with the drag's momentum");
     QObject::connect(momentum_spin_action, &QAction::triggered, this, [this](bool on) {
         canvas->setMomentumEnabled(on);
         QSettings().setValue(MOMENTUM_KEY, on);
     });
+
+    // Fixed spin speed presets (the spin no longer uses the flick velocity)
+    momentum_menu->addSeparator();
+    const auto speed_menu = momentum_menu->addMenu("S&peed");
+    const auto momentum_speeds = new QActionGroup(speed_menu);
+    const QList<QPair<QString, double>> presets = {
+        {"Slow (90°/s)", 90}, {"Medium (180°/s)", 180}, {"Fast (360°/s)", 360}, {"Very fast (720°/s)", 720}};
+    const double current = canvas->getMomentumSpeed();
+    double best = 1e9;
+    QAction* bestAct = nullptr;
+    for (const auto& p : presets) {
+        auto act = new QAction(p.first, this);
+        act->setCheckable(true);
+        momentum_speeds->addAction(act);
+        speed_menu->addAction(act);
+        QObject::connect(act, &QAction::triggered, this, [this, speed = p.second] { canvas->setMomentumSpeed(speed); });
+        if (qAbs(current - p.second) < best) {
+            best = qAbs(current - p.second);
+            bestAct = act;
+        }
+    }
+    if (bestAct) {
+        bestAct->setChecked(true);
+    }
 
     view_menu->addAction(animate_action);
     QObject::connect(animate_action, &QAction::triggered, this, &Window::on_animate_dialog);
@@ -678,8 +703,9 @@ void Window::on_help_usage()
         "off by default.</li>"
         "<li><b>Invert Zoom</b> &mdash; flip the scroll-wheel zoom direction</li>"
         "<li><b>Reset rotation on load</b> &mdash; whether opening a file resets the orientation</li>"
-        "<li><b>Momentum Spin</b> &mdash; when enabled, releasing a drag keeps the model spinning with "
-        "the drag's velocity and trajectory; click to stop (off by default)</li>"
+        "<li><b>Momentum Spin</b> &mdash; when enabled, releasing a drag keeps the model spinning along "
+        "the drag's direction at a fixed speed (set via the Speed submenu: 90&ndash;720&deg;/s); click "
+        "to stop. Off by default.</li>"
         "<li><b>Animate Rotation</b> &mdash; continuous rotation with per-axis speeds (default: slow Y "
         "turntable). Random mode changes speed and axis at random intervals (configurable min/max "
         "seconds) with smooth transitions, continuing from the current view. Optional random cycling of "
