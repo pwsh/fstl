@@ -545,6 +545,18 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### View > Up Axis toggle
+
+- **Z-up / Y-up viewpoint convention** - `src/canvas.{h,cpp}`,
+  `src/window.{h,cpp}`: the viewpoint presets (Top, Front, ...) and the
+  default load orientation assume the model's up axis is Z (the STL /
+  3D-printing convention). A model authored Y-up therefore showed Top and
+  Front swapped. A new **View > Up Axis** submenu (Z up / Y up, persisted)
+  applies a Y-up to Z-up correction (a 90 degree X pre-rotation) to the
+  presets and default view, and re-orients immediately. Verified with an
+  asymmetric test box: under Y-up, Top and Front render the same faces
+  that Front and Top do under Z-up.
+
 ### Documentation: complete switch reference and interface screenshots
 
 - **README / man page / `--help` audited for completeness**: a

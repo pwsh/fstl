@@ -102,6 +102,8 @@ private:
     QAction* const export_mp4_rotation_action;
     QAction* const export_settings_action;
     QAction* const import_settings_action;
+    QAction* const up_axis_z_action;
+    QAction* const up_axis_y_action;
     QAction* const momentum_spin_action;
     QAction* const animate_action;
     QAction* const keybindings_action;

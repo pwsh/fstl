@@ -39,6 +39,11 @@ public:
     void common_view_change(enum ViewPoint c);
     void setResetTransformOnLoad(bool d);
 
+    /*  Up-axis convention for the viewpoint presets and default view.
+     *  false = Z-up (STL/3D-printing default), true = Y-up. */
+    bool upAxisIsY() const;
+    void setUpAxisIsY(bool yUp);
+
     QColor getAmbientColor();
     void setAmbientColor(QColor c);
     double getAmbientFactor();
@@ -142,6 +147,7 @@ private:
     QMatrix4x4 aspect_matrix() const;
     QMatrix4x4 view_matrix() const;
     void resetTransform();
+    void applyUpAxis(QMatrix4x4& m) const;
     QPointF changeMouseCoordinates(QPoint p);
     void calcArcballTransform(QPointF p1, QPointF p2);
 
@@ -183,6 +189,7 @@ private:
     const static QString BACKGROUND_COLOR;
     const static QString LIGHT_BRIGHTNESS;
     const static QString MODEL_OPACITY;
+    const static QString UP_AXIS_IS_Y;
 
     std::unique_ptr<GLMesh> mesh;
     std::unique_ptr<Backdrop> backdrop;
@@ -209,6 +216,7 @@ private:
     bool drawAxes = false;
     bool invertZoom = false;
     bool resetTransformOnLoad = true;
+    bool yUpAxis = false; // viewpoint presets assume Y-up instead of Z-up
     Q_PROPERTY(float perspective MEMBER perspective WRITE set_perspective);
     QPropertyAnimation anim;
 

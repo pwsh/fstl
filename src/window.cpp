@@ -65,6 +65,8 @@ Window::Window(QWidget* parent) :
     export_mp4_rotation_action(new QAction("Export Rotation &MP4...", this)),
     export_settings_action(new QAction("Export Se&ttings...", this)),
     import_settings_action(new QAction("Import Settin&gs...", this)),
+    up_axis_z_action(new QAction("&Z up (default)", this)),
+    up_axis_y_action(new QAction("&Y up", this)),
     momentum_spin_action(new QAction("Momentum &Spin", this)),
     animate_action(new QAction("Animate &Rotation...", this)),
     keybindings_action(new QAction("Configure &Keyboard Shortcuts...", this)),
@@ -217,6 +219,20 @@ Window::Window(QWidget* parent) :
     common_view_right_action->setShortcut(Qt::Key_6);
     common_view_center_action->setShortcut(Qt::Key_9);
     QObject::connect(common_views, &QActionGroup::triggered, this, &Window::on_common_view_change);
+
+    const auto up_axis_menu = view_menu->addMenu("&Up Axis");
+    up_axis_menu->addAction(up_axis_z_action);
+    up_axis_menu->addAction(up_axis_y_action);
+    const auto up_axes = new QActionGroup(up_axis_menu);
+    for (auto a : {up_axis_z_action, up_axis_y_action}) {
+        up_axes->addAction(a);
+        a->setCheckable(true);
+    }
+    up_axes->setExclusive(true);
+    up_axis_z_action->setChecked(!canvas->upAxisIsY());
+    up_axis_y_action->setChecked(canvas->upAxisIsY());
+    QObject::connect(up_axes, &QActionGroup::triggered, this,
+                     [this](QAction* a) { canvas->setUpAxisIsY(a == up_axis_y_action); });
 
     view_menu->addAction(axes_action);
     axes_action->setCheckable(true);
@@ -630,6 +646,9 @@ void Window::on_help_usage()
         "colors and light direction via <b>Draw Mode Settings</b>, which also offers a <i>background "
         "color</i> picker for every mode &mdash; Reset restores the gradient)</li>"
         "<li><b>Viewpoint</b> &mdash; jump to standard views or re-center the model</li>"
+        "<li><b>Up Axis</b> &mdash; whether the viewpoint presets treat <i>Z</i> (the STL / "
+        "3D-printing default) or <i>Y</i> as the model's up axis. Switch to <i>Y up</i> if Top and "
+        "Front appear swapped, which means the model was authored Y-up.</li>"
         "<li><b>Draw Axes</b> &mdash; show model-space axes, an orientation hud, and mesh statistics</li>"
         "<li><b>Invert Zoom</b> &mdash; flip the scroll-wheel zoom direction</li>"
         "<li><b>Reset rotation on load</b> &mdash; whether opening a file resets the orientation</li>"

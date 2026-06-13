@@ -35,6 +35,7 @@ const QString Canvas::CURRENT_LIGHT_DIRECTION = "currentLightDirection";
 const QString Canvas::BACKGROUND_COLOR = "backgroundColor";
 const QString Canvas::LIGHT_BRIGHTNESS = "lightBrightness";
 const QString Canvas::MODEL_OPACITY = "modelOpacity";
+const QString Canvas::UP_AXIS_IS_Y = "upAxisIsY";
 
 const QColor Canvas::defaultAmbientColor = QColor::fromRgbF(0.22, 0.8, 1.0);
 const QColor Canvas::defaultDirectiveColor = QColor(255, 255, 255);
@@ -50,7 +51,6 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     styleFile.open(QFile::ReadOnly);
     setStyleSheet(styleFile.readAll());
     currentTransform = QMatrix4x4();
-    resetTransform();
 
     QSettings settings;
     ambientColor = settings.value(AMBIENT_COLOR, defaultAmbientColor).value<QColor>();
@@ -60,6 +60,10 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     backgroundColor = settings.value(BACKGROUND_COLOR, QColor()).value<QColor>();
     lightBrightness = settings.value(LIGHT_BRIGHTNESS, 1.0).toFloat();
     modelOpacity = settings.value(MODEL_OPACITY, 1.0).toFloat();
+    yUpAxis = settings.value(UP_AXIS_IS_Y, false).toBool();
+
+    // Read the up-axis preference before establishing the initial view
+    resetTransform();
 
     // Fill direction list
     // Fill in directions
@@ -160,6 +164,7 @@ void Canvas::common_view_change(enum ViewPoint c)
     default:
         break;
     }
+    applyUpAxis(currentTransform);
     update();
 }
 
@@ -189,6 +194,17 @@ void Canvas::setResetTransformOnLoad(bool d)
     resetTransformOnLoad = d;
 }
 
+void Canvas::applyUpAxis(QMatrix4x4& m) const
+{
+    // The viewpoint presets and default orientation assume the model's
+    // up axis is Z (the STL / 3D-printing convention). When the model is
+    // authored Y-up, rotate it into that canonical space first (added
+    // last, so it is applied to the model before everything else).
+    if (yUpAxis) {
+        m.rotate(90, QVector3D(1, 0, 0)); // model +Y -> working +Z
+    }
+}
+
 QMatrix4x4 Canvas::defaultOrientation() const
 {
     // The initial orientation applied on load / reset
@@ -196,7 +212,24 @@ QMatrix4x4 Canvas::defaultOrientation() const
     m.rotate(-90.0, QVector3D(1, 0, 0));
     m.rotate(180.0 + 15.0, QVector3D(0, 0, 1));
     m.rotate(15.0, QVector3D(1, -sin(M_PI / 12), 0));
+    applyUpAxis(m);
     return m;
+}
+
+bool Canvas::upAxisIsY() const
+{
+    return yUpAxis;
+}
+
+void Canvas::setUpAxisIsY(bool yUp)
+{
+    if (yUpAxis == yUp) {
+        return;
+    }
+    yUpAxis = yUp;
+    QSettings().setValue(UP_AXIS_IS_Y, yUp);
+    resetTransform(); // re-orient to the default view in the new convention
+    update();
 }
 
 void Canvas::resetTransform()

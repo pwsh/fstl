@@ -58,6 +58,13 @@ picker that applies to every draw mode. **Configure Keyboard Shortcuts...**
 rebinds file navigation (Left/Right), keyboard movement (W/A/S/D rotate,
 Q/E roll, Shift+W/A/S/D pan, +/- zoom), and the common operations.
 
+**View > Up Axis** chooses whether the viewpoint presets treat **Z** (the
+STL / 3D-printing default) or **Y** as the model's up axis. The STL format
+stores no up-axis, so a model authored Y-up (common from some
+graphics/CAD tools) will show Top and Front swapped under the default
+Z-up presets; switch to **Y up** to correct them. The choice persists and
+re-orients the view immediately.
+
 ### Command-line export
 
 Passing `--export-png` and/or `--export-gif` runs fstl as a renderer with
