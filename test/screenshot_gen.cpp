@@ -15,6 +15,7 @@
 #include "../src/keybindingsdialog.h"
 #include "../src/loader.h"
 #include "../src/shaderlightprefs.h"
+#include "../src/statisticsdialog.h"
 #include "../src/window.h"
 
 static QString outDir;
@@ -123,6 +124,9 @@ int main(int argc, char* argv[])
     save(&gifDlg, "dialog-export-gif");
     Mp4ExportDialog mp4Dlg;
     save(&mp4Dlg, "dialog-export-mp4");
+
+    StatisticsDialog statsDlg(nullptr, canvas);
+    save(&statsDlg, "dialog-statistics");
 
     printf("done\n");
     QTimer::singleShot(0, &app, &QApplication::quit);

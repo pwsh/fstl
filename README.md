@@ -58,10 +58,14 @@ picker that applies to every draw mode. **Configure Keyboard Shortcuts...**
 rebinds file navigation (Left/Right), keyboard movement (W/A/S/D rotate,
 Q/E roll, Shift+W/A/S/D pan, +/- zoom), and the common operations.
 
-**View > Statistics** overlays selectable figures on the viewport -
-triangle count, bounding box, model size, orientation, rotation speed,
-frame rate, zoom/projection, draw mode, colors, and lighting - each
-toggled independently. All are off by default. (Previously this info was
+**View > Statistics...** opens a dialog to overlay selectable figures on
+the viewport - triangle count, bounding box, model size, orientation,
+rotation speed, frame rate, zoom/projection, draw mode, colors, and
+lighting. A master *Show statistics overlay* switch turns the whole
+overlay on or off (off by default) while the items below choose what is
+shown.
+
+![Statistics dialog](docs/images/dialog-statistics.png) (Previously this info was
 tied to Draw Axes; Draw Axes now shows only the 3D axes and the corner
 orientation hud.)
 

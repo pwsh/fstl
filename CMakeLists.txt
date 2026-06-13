@@ -74,7 +74,8 @@ src/loader.cpp
 src/main.cpp
 src/mesh.cpp
 src/window.cpp
-src/shaderlightprefs.cpp)
+src/shaderlightprefs.cpp
+src/statisticsdialog.cpp)
 
 #set project headers.
 set(Project_Headers src/app.h
@@ -91,7 +92,8 @@ src/glmesh.h
 src/loader.h
 src/mesh.h
 src/window.h
-src/shaderlightprefs.h)
+src/shaderlightprefs.h
+src/statisticsdialog.h)
 
 #set project resources and icon resource
 set(Project_Resources qt/qt.qrc gl/gl.qrc)

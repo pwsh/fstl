@@ -11,6 +11,7 @@
 class Canvas;
 class RotationAnimationDialog;
 class ShaderLightPrefs;
+class StatisticsDialog;
 
 class Window : public QMainWindow
 {
@@ -60,6 +61,7 @@ private slots:
     void on_export_settings();
     void on_import_settings();
     void on_animate_dialog();
+    void on_statistics_dialog();
     void on_keybindings();
     void on_help_usage();
     void on_fullscreen();
@@ -106,6 +108,7 @@ private:
     QAction* const up_axis_y_action;
     QAction* const momentum_spin_action;
     QAction* const animate_action;
+    QAction* const statistics_action;
     QAction* const keybindings_action;
     QAction* const help_usage_action;
     QAction* const hide_menuBar_action;
@@ -137,18 +140,12 @@ private:
 
     ShaderLightPrefs* meshlightprefs;
     RotationAnimationDialog* animateDialog;
+    StatisticsDialog* statisticsDialog;
 
     /*  User-rebindable shortcuts (file navigation, movement, common
      *  operations); edited via View > Configure Keyboard Shortcuts */
     void setup_bindable_actions();
     QList<BindableAction> bindable_actions;
-
-    /*  View > Statistics overlay items, each a checkable action mapped
-     *  to a StatFlag bit. */
-    void setup_statistics_menu(QMenu* view_menu);
-    QList<QPair<QAction*, int>> stat_actions;
-    void apply_stat_flags();
-    static const QString STATISTICS_KEY;
 };
 
 #endif // WINDOW_H

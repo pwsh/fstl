@@ -21,6 +21,7 @@
 #include "gif.h"
 #include "loader.h"
 #include "shaderlightprefs.h"
+#include "statisticsdialog.h"
 #include "window.h"
 
 const QString Window::OPEN_EXTERNAL_KEY = "externalCmd";
@@ -33,7 +34,6 @@ const QString Window::DRAW_MODE_KEY = "drawMode";
 const QString Window::WINDOW_GEOM_KEY = "windowGeometry";
 const QString Window::RESET_TRANSFORM_ON_LOAD_KEY = "resetTransformOnLoad";
 const QString Window::MOMENTUM_KEY = "momentumSpin";
-const QString Window::STATISTICS_KEY = "statistics";
 
 Window::Window(QWidget* parent) :
     QMainWindow(parent),
@@ -70,6 +70,7 @@ Window::Window(QWidget* parent) :
     up_axis_y_action(new QAction("&Y up", this)),
     momentum_spin_action(new QAction("Momentum &Spin", this)),
     animate_action(new QAction("Animate &Rotation...", this)),
+    statistics_action(new QAction("S&tatistics...", this)),
     keybindings_action(new QAction("Configure &Keyboard Shortcuts...", this)),
     help_usage_action(new QAction("&Usage and Controls", this)),
     hide_menuBar_action(new QAction("Hide &Menu Bar", this)),
@@ -239,7 +240,8 @@ Window::Window(QWidget* parent) :
     axes_action->setCheckable(true);
     QObject::connect(axes_action, &QAction::triggered, this, &Window::on_drawAxes);
 
-    setup_statistics_menu(view_menu);
+    view_menu->addAction(statistics_action);
+    QObject::connect(statistics_action, &QAction::triggered, this, &Window::on_statistics_dialog);
 
     view_menu->addAction(invert_zoom_action);
     invert_zoom_action->setCheckable(true);
@@ -276,6 +278,8 @@ Window::Window(QWidget* parent) :
     this->addAction(fullscreen_action);
 
     animateDialog = new RotationAnimationDialog(this, canvas);
+    // Applies the persisted statistics selection to the canvas on creation
+    statisticsDialog = new StatisticsDialog(this, canvas);
 
     setup_bindable_actions();
 
@@ -340,42 +344,13 @@ void Window::load_persist_settings()
     restoreGeometry(settings.value(WINDOW_GEOM_KEY).toByteArray());
 }
 
-void Window::setup_statistics_menu(QMenu* view_menu)
+void Window::on_statistics_dialog()
 {
-    auto stats_menu = view_menu->addMenu("&Statistics");
-    stats_menu->setToolTipsVisible(true);
-
-    // label, StatFlag bit
-    const QList<QPair<QString, int>> items = {
-        {"Triangle count", StatTriangles},     {"Bounding box", StatBoundingBox},
-        {"Model size", StatModelSize},          {"Orientation", StatOrientation},
-        {"Rotation speed", StatRotationSpeed},  {"Frame rate (FPS)", StatFps},
-        {"Zoom / projection", StatZoomProjection}, {"Draw mode", StatDrawMode},
-        {"Colors", StatColors},                 {"Lighting", StatLighting},
-    };
-
-    const int saved = QSettings().value(STATISTICS_KEY, 0).toInt();
-    for (const auto& it : items) {
-        auto act = new QAction(it.first, this);
-        act->setCheckable(true);
-        act->setChecked(saved & it.second);
-        stats_menu->addAction(act);
-        stat_actions.append({act, it.second});
-        QObject::connect(act, &QAction::triggered, this, &Window::apply_stat_flags);
+    if (statisticsDialog->isVisible()) {
+        statisticsDialog->hide();
+    } else {
+        statisticsDialog->show();
     }
-    apply_stat_flags();
-}
-
-void Window::apply_stat_flags()
-{
-    int flags = 0;
-    for (const auto& pair : stat_actions) {
-        if (pair.first->isChecked()) {
-            flags |= pair.second;
-        }
-    }
-    canvas->setStatFlags(flags);
-    QSettings().setValue(STATISTICS_KEY, flags);
 }
 
 void Window::setup_bindable_actions()
@@ -691,9 +666,10 @@ void Window::on_help_usage()
         "3D-printing default) or <i>Y</i> as the model's up axis. Switch to <i>Y up</i> if Top and "
         "Front appear swapped, which means the model was authored Y-up.</li>"
         "<li><b>Draw Axes</b> &mdash; show the model-space axes and the orientation hud in the corner</li>"
-        "<li><b>Statistics</b> &mdash; choose which figures to overlay (triangle count, bounding box, "
-        "model size, orientation, rotation speed, FPS, zoom/projection, draw mode, colors, lighting). "
-        "All off by default.</li>"
+        "<li><b>Statistics</b> &mdash; opens a dialog to choose which figures to overlay (triangle count, "
+        "bounding box, model size, orientation, rotation speed, FPS, zoom/projection, draw mode, colors, "
+        "lighting). A master <i>Show statistics overlay</i> switch turns the whole overlay on or off; "
+        "off by default.</li>"
         "<li><b>Invert Zoom</b> &mdash; flip the scroll-wheel zoom direction</li>"
         "<li><b>Reset rotation on load</b> &mdash; whether opening a file resets the orientation</li>"
         "<li><b>Momentum Spin</b> &mdash; when enabled, releasing a drag keeps the model spinning with "

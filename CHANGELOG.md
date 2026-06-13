@@ -545,6 +545,15 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### Statistics moved to a dialog
+
+- **View > Statistics... dialog** - `src/statisticsdialog.{h,cpp}` (new),
+  `src/window.{h,cpp}`: the statistics submenu of checkboxes is replaced
+  by a dialog with a master "Show statistics overlay" switch plus the ten
+  item checkboxes. The master toggles the whole overlay on/off (off by
+  default); items are greyed out while it is off but keep their
+  selection. Applies live and persists (statistics/enabled + items).
+
 ### Momentum spin uses a fixed speed
 
 - **Static momentum speed** - `src/canvas.{h,cpp}`: releasing a drag with
