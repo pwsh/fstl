@@ -45,9 +45,11 @@ rotation.
 .SH GUI OPTIONS
 .TP
 .BR \-f ", " \-\-foreground
-Stay attached to the launching terminal. By default the GUI forks into
-the background so the shell prompt returns immediately and the viewer
-survives the terminal closing.
+Stay attached to the launching terminal. When started from a terminal
+the GUI forks into the background by default so the shell prompt returns
+immediately and the viewer survives the terminal closing; this flag
+keeps it in the foreground. Launches with no controlling terminal (from
+a desktop or file manager) never fork.
 .TP
 .I file.stl
 The model to open. A leading

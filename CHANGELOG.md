@@ -545,6 +545,18 @@ the object (X/Y still default to -1..1).
   Verified end-to-end (h264 output validated with ffprobe; settings
   precedence and opacity alpha checked per pixel).
 
+### Fix: spurious "fstl is ready" desktop notification
+
+- **Only fork-detach when launched from a terminal** - `src/main.cpp`:
+  the background fork-on-launch (which frees the terminal so the shell
+  prompt returns) ran for every GUI launch too. On a desktop launch
+  there is no terminal to release, and forking detaches the process from
+  the desktop's launch tracking, so GNOME showed a "'fstl' is ready"
+  window-attention notification when a dialog (e.g. Statistics) later
+  mapped. The detach now happens only when stdin/stdout/stderr is a tty
+  (a real terminal launch); GUI launches stay attached. Verified both
+  paths: non-tty launch no longer forks, tty launch still detaches.
+
 ### Statistics moved to a dialog
 
 - **View > Statistics... dialog** - `src/statisticsdialog.{h,cpp}` (new),

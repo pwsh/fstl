@@ -29,10 +29,20 @@ void ensure_runtime_dir()
 }
 
 /*  Detach the GUI from the launching terminal so the shell prompt returns
- *  immediately. Must run before the QApplication exists. */
+ *  immediately. Must run before the QApplication exists.
+ *
+ *  Only forks when there is actually a controlling terminal to release.
+ *  When launched from a desktop/file-manager there is no terminal, and
+ *  forking there detaches the process from the desktop's launch tracking,
+ *  which makes GNOME show a "'fstl' is ready" attention notification when
+ *  a window later maps. So a GUI launch is left attached (it has nothing
+ *  to detach from anyway). */
 void detach_from_terminal()
 {
 #ifdef Q_OS_UNIX
+    if (!isatty(STDIN_FILENO) && !isatty(STDOUT_FILENO) && !isatty(STDERR_FILENO)) {
+        return; // not launched from a terminal; nothing to release
+    }
     const pid_t pid = fork();
     if (pid > 0) {
         _exit(0); // parent: release the terminal
