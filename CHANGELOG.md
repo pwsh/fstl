@@ -585,6 +585,15 @@ the object (X/Y still default to -1..1).
   default); items are greyed out while it is off but keep their
   selection. Applies live and persists (statistics/enabled + items).
 
+### Momentum spin back to flick velocity
+
+- Reverted the fixed/configurable momentum speed: the spin again
+  continues at the velocity (and along the trajectory) of the final drag
+  motion, so a faster flick spins faster, as it originally did. The
+  speed submenu/presets were removed. `src/canvas.{h,cpp}`,
+  `src/window.cpp`. (Speed is capped at 720 deg/s and needs a flick of
+  >30 deg/s to start.)
+
 ### Momentum spin speed is configurable
 
 - The fixed momentum speed (60 deg/s) was much slower than the old

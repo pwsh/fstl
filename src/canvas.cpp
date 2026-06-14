@@ -37,7 +37,6 @@ const QString Canvas::BACKGROUND_COLOR = "backgroundColor";
 const QString Canvas::LIGHT_BRIGHTNESS = "lightBrightness";
 const QString Canvas::MODEL_OPACITY = "modelOpacity";
 const QString Canvas::UP_AXIS_IS_Y = "upAxisIsY";
-const QString Canvas::MOMENTUM_SPEED = "momentumSpeed";
 
 const QColor Canvas::defaultAmbientColor = QColor::fromRgbF(0.22, 0.8, 1.0);
 const QColor Canvas::defaultDirectiveColor = QColor(255, 255, 255);
@@ -63,7 +62,6 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     lightBrightness = settings.value(LIGHT_BRIGHTNESS, 1.0).toFloat();
     modelOpacity = settings.value(MODEL_OPACITY, 1.0).toFloat();
     yUpAxis = settings.value(UP_AXIS_IS_Y, false).toBool();
-    momentumSpeed = settings.value(MOMENTUM_SPEED, 360.0).toFloat();
 
     // Read the up-axis preference before establishing the initial view
     resetTransform();
@@ -101,7 +99,7 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     connect(&spin_timer, &QTimer::timeout, this, [this] {
         const float dt = spin_clock.restart() / 1000.0f;
         QMatrix4x4 r;
-        r.rotate(momentumSpeed * dt, last_drag_axis);
+        r.rotate(last_drag_speed * dt, last_drag_axis);
         currentTransform = r * currentTransform;
         update();
     });
@@ -600,7 +598,7 @@ void Canvas::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
         stopSpin();
-        last_drag_valid = false;
+        last_drag_speed = 0;
         drag_clock.invalidate();
         mouse_pos = mouse_position(event);
         setCursor(Qt::ClosedHandCursor);
@@ -612,11 +610,11 @@ void Canvas::mouseReleaseEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton || event->button() == Qt::RightButton) {
         unsetCursor();
     }
-    // Continue spinning at the fixed momentum speed, along the drag's
-    // trajectory, if the release came straight out of an active drag
-    // (not after the mouse stopped moving).
-    if (event->button() == Qt::LeftButton && momentumEnabled && last_drag_valid && drag_clock.isValid() &&
-        drag_clock.elapsed() < 150) {
+    // Keep spinning with the drag's velocity if the release came straight
+    // out of an active drag (not after the mouse stopped moving)
+    if (event->button() == Qt::LeftButton && momentumEnabled && drag_clock.isValid() &&
+        drag_clock.elapsed() < 150 && last_drag_speed > 30.0f) {
+        last_drag_speed = std::min(last_drag_speed, 720.0f);
         spin_clock.start();
         spin_timer.start();
     }
@@ -628,17 +626,6 @@ void Canvas::setMomentumEnabled(bool enabled)
     if (!enabled) {
         stopSpin();
     }
-}
-
-double Canvas::getMomentumSpeed() const
-{
-    return momentumSpeed;
-}
-
-void Canvas::setMomentumSpeed(double degPerSec)
-{
-    momentumSpeed = float(degPerSec);
-    QSettings().setValue(MOMENTUM_SPEED, degPerSec);
 }
 
 void Canvas::stopSpin()
@@ -697,14 +684,16 @@ void Canvas::calcArcballTransform(QPointF p1, QPointF p2)
     // calc angle
     double angle = acos(std::min(1.0f, QVector3D::dotProduct(v1, v2))) * 180.0 / M_PI;
 
-    // Remember the drag trajectory (axis) for momentum spin and mark the
-    // movement as recent. The spin speed itself is a fixed internal value
-    // (momentumSpeed), not derived from how fast the mouse was moving.
-    if (angle > 1e-3) {
-        last_drag_axis = v1xv2.normalized();
-        last_drag_valid = true;
-        drag_clock.restart();
+    // Track angular velocity for momentum spin: the spin continues at the
+    // speed (and along the axis) of the final drag motion.
+    if (drag_clock.isValid()) {
+        const double dt = drag_clock.nsecsElapsed() / 1e9;
+        if (dt > 1e-4 && angle > 0) {
+            last_drag_speed = angle / dt;
+            last_drag_axis = v1xv2.normalized();
+        }
     }
+    drag_clock.restart();
 
     // apply transform
     currentTransform.rotate(angle, v1xv2Obj);
