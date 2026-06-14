@@ -6,7 +6,7 @@ Release artifacts for fstl 0.13.0.
 |---|---|---|
 | `fstl-0.13.0-linux-x86_64` | Linux x86-64 | Standalone executable. Needs Qt 6 runtime libraries (`libqt6widgets6`, `libqt6opengl6`, ...). |
 | `fstl-0.13.0.deb` | Debian/Ubuntu x86-64 | Installer: `sudo apt install ./fstl-0.13.0.deb` (pulls Qt deps, adds the menu entry, icons, and `man fstl`). |
-| `fstl-0.13.0-win64.zip` | Windows x86-64 | Unzip and run `fstl\fstl.exe`. Bundles the Qt 6 DLLs; no install needed. MP4 export needs `ffmpeg` on the PATH. |
+| `fstl-0.13.0-win64.zip` | Windows x86-64 | Unzip and run `fstl\fstl.exe`. Bundles the Qt 6 DLLs and MinGW runtime; no install needed. MP4 export needs `ffmpeg` on the PATH. |
 
 These were built from this commit. To rebuild:
 

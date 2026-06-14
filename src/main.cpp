@@ -69,12 +69,15 @@ int main(int argc, char* argv[])
     ensure_runtime_dir();
 
     if (cli_export_requested(argc, argv)) {
-        // Headless export: no window is shown, so fall back to the
-        // offscreen platform when there is no display to connect to
+#ifdef Q_OS_UNIX
+        // Headless export on X11/Wayland: no window is shown, so fall back
+        // to the offscreen platform when there is no display to connect to.
+        // (Not on Windows, where the windows platform is always available.)
         if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && !qEnvironmentVariableIsSet("DISPLAY") &&
             !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
             qputenv("QT_QPA_PLATFORM", "offscreen");
         }
+#endif
         QGuiApplication cli_app(argc, argv);
         return run_cli_export(cli_app.arguments());
     }

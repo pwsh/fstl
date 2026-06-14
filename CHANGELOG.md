@@ -482,6 +482,27 @@ timed transitions, collapsible UI** — `src/animatedialog.{h,cpp}`
 ffmpeg`. Help dialog, About, man page, and README document all of the
 above.
 
+### Windows: bundle MinGW runtime DLLs + automated smoke test
+
+- **Fix "libstdc++-6.dll was not found" on launch** - `cross/build-windows.sh`:
+  the EXE links the C++ runtime statically, but the Qt 6 DLLs were built
+  against the MinGW runtime dynamically, so `libstdc++-6.dll`,
+  `libgcc_s_seh-1.dll`, and `libwinpthread-1.dll` (version-matched copies
+  from the Qt bin dir) are now shipped in the bundle, along with the
+  offscreen platform plugin.
+- **CLI offscreen fallback was wrong on Windows** - `src/main.cpp`: the
+  "no DISPLAY -> force QT_QPA_PLATFORM=offscreen" logic fired on Windows
+  (which has neither DISPLAY nor WAYLAND_DISPLAY), selecting a platform we
+  did not ship. It is now guarded to Unix only; Windows always uses the
+  windows platform.
+- **Automated Windows testing** - `cross/test-windows.sh` (new),
+  `cross/Dockerfile`: the build image gained Wine + Xvfb, and the build
+  now smoke-tests the bundle by running `fstl.exe` under Wine - a CLI PNG
+  export that loads every bundled DLL, renders with OpenGL, and writes a
+  file (catches exactly this missing-DLL class of regression; the build
+  fails if it fails, skippable with SKIP_WINE_TEST=1). The Wine render is
+  byte-identical to the Linux render (20398-byte sphere PNG).
+
 ### Windows cross-build
 
 **Standalone Windows release** — `cross/` (new: `Dockerfile`,

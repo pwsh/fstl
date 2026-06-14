@@ -17,4 +17,10 @@ RUN python3 -m pip install --break-system-packages aqtinstall
 RUN aqt install-qt linux desktop 6.4.2 --help > /dev/null 2>&1 || true
 RUN aqt install-qt windows desktop 6.4.2 win64_mingw -O /opt/qt
 
+# Wine + Xvfb for headless smoke-testing of the built .exe (separate layer
+# so the large Qt download above stays cached when this changes)
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        wine wine64 xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /src
