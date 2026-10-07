@@ -3,3 +3,4 @@ build-*/
 dist-windows/
 *.pro.user
 *.qmake.stash
+dist-linux/

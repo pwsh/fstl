@@ -108,7 +108,7 @@ cat model.stl | fstl - --export-png --output render.png
 ```
 
 Every switch is listed below. `fstl --help` prints the same reference,
-and `man fstl` has the full manual. The tables match fstl 0.13.0.
+and `man fstl` has the full manual. The tables match fstl 0.14.0.
 
 #### Mode selection
 
@@ -341,8 +341,31 @@ To produce an installable package (`.deb`, plus `.rpm` if `rpmbuild` is
 installed), run `cpack` in the build directory. The package installs the
 binary, a desktop menu entry, and icons.
 
-Configuring with `-DFSTL_BUILD_TESTS=ON` adds a `fstl_test_export` binary
-that verifies the rotation-export pipeline end to end.
+Configuring with `-DFSTL_BUILD_TESTS=ON` builds the test programs
+(`fstl_test_export`, `fstl_test_teardown`, `fstl_test_loader`) and registers
+them with `ctest`, together with CLI export smoke tests. The GL tests need a
+display; headless, run `xvfb-run -a ctest` in the build directory.
+
+### Windows (cross-compiled from Linux)
+
+The release Windows build is cross-compiled with MinGW inside a Docker
+container against the official Qt 6.10 binaries and smoke-tested under
+Wine (see `cross/`):
+
+```
+docker build -t fstl-mingw cross/
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v "$PWD":/src fstl-mingw \
+    bash /src/cross/build-windows.sh      # -> dist-windows/fstl-<version>-win64.zip
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v "$PWD":/src fstl-mingw \
+    bash /src/cross/build-linux.sh        # -> dist-linux/ (portable binary + .deb)
+```
+
+The same container also produces the portable Linux binary and `.deb`
+against Ubuntu 24.04's Qt 6.4 so they run on current distributions.
+
+Prebuilt binaries for each release are attached to the
+[GitHub releases](https://github.com/pwsh/fstl/releases) and kept in
+[`dist/`](dist/).
 
 --------------------------------------------------------------------------------
 

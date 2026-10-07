@@ -33,6 +33,29 @@
 #include <string.h>  // for memcpy and bzero
 #include <stdint.h>  // for integer typedefs
 #include <stdbool.h> // for bool macros
+#include <stdlib.h>  // for malloc/free
+#if defined(_WIN32)
+// fstl patch: MultiByteToWideChar/_wfopen for UTF-8 paths.  Keep windows.h
+// from defining min/max macros that would break std::min/std::max.
+#include <wchar.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#define GIF_UNDEF_NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#define GIF_UNDEF_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#ifdef GIF_UNDEF_NOMINMAX
+#undef NOMINMAX
+#undef GIF_UNDEF_NOMINMAX
+#endif
+#ifdef GIF_UNDEF_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef GIF_UNDEF_LEAN_AND_MEAN
+#endif
+#endif
 
 // Define these macros to hook into a custom memory allocator.
 // TEMP_MALLOC and TEMP_FREE will only be called in stack fashion - frees in the reverse order of mallocs
@@ -378,14 +401,16 @@ inline int GifPickChangedPixels( const uint8_t* lastFrame, uint8_t* frame, int n
 
 // Creates a palette by placing all the image pixels in a k-d tree and then averaging the blocks at the bottom.
 // This is known as the "median split" technique
-inline void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_t width, uint32_t height, int bitDepth, bool buildForDither, GifPalette* pPal )
+// fstl patch: returns false if the scratch buffer can't be allocated
+inline bool GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, uint32_t width, uint32_t height, int bitDepth, bool buildForDither, GifPalette* pPal )
 {
     pPal->bitDepth = bitDepth;
 
     // SplitPalette is destructive (it sorts the pixels by color) so
     // we must create a copy of the image for it to destroy
-    size_t imageSize = (size_t)(width * height * 4 * sizeof(uint8_t));
+    size_t imageSize = (size_t)width * height * 4 * sizeof(uint8_t);
     uint8_t* destroyableImage = (uint8_t*)GIF_TEMP_MALLOC(imageSize);
+    if(!destroyableImage) return false;
     memcpy(destroyableImage, nextFrame, imageSize);
 
     int numPixels = (int)(width * height);
@@ -401,10 +426,12 @@ inline void GifMakePalette( const uint8_t* lastFrame, const uint8_t* nextFrame, 
     pPal->treeSplitElt[1 << (bitDepth-1)] = 0;
 
     pPal->r[0] = pPal->g[0] = pPal->b[0] = 0;
+    return true;
 }
 
 // Implements Floyd-Steinberg dithering, writes palette value to alpha
-inline void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t* outFrame, uint32_t width, uint32_t height, GifPalette* pPal )
+// fstl patch: returns false if the scratch buffer can't be allocated
+inline bool GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, uint8_t* outFrame, uint32_t width, uint32_t height, GifPalette* pPal )
 {
     int numPixels = (int)(width * height);
 
@@ -412,6 +439,7 @@ inline void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, 
     // The extra 8 bits of precision allow for sub-single-color error values
     // to be propagated
     int32_t *quantPixels = (int32_t *)GIF_TEMP_MALLOC(sizeof(int32_t) * (size_t)numPixels * 4);
+    if(!quantPixels) return false;
 
     for( int ii=0; ii<numPixels*4; ++ii )
     {
@@ -510,6 +538,7 @@ inline void GifDitherImage( const uint8_t* lastFrame, const uint8_t* nextFrame, 
     }
 
     GIF_TEMP_FREE(quantPixels);
+    return true;
 }
 
 // Picks palette colors for the image using simple thresholding, no dithering
@@ -633,8 +662,12 @@ inline void GifWritePalette( const GifPalette* pPal, FILE* f )
 }
 
 // write the image header, LZW-compress and write out the image
-inline void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, GifPalette* pPal, bool restoreBg = false)
+// fstl patch: returns false (having written nothing) if the code tree can't be allocated
+inline bool GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t top,  uint32_t width, uint32_t height, uint32_t delay, GifPalette* pPal, bool restoreBg = false)
 {
+    GifLzwNode* codetree = (GifLzwNode*)GIF_TEMP_MALLOC(sizeof(GifLzwNode)*4096);
+    if(!codetree) return false;
+
     // graphics control extension
     fputc(0x21, f);
     fputc(0xf9, f);
@@ -670,8 +703,6 @@ inline void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t to
     const uint32_t clearCode = 1 << pPal->bitDepth;
 
     fputc(minCodeSize, f); // min code size 8 bits
-
-    GifLzwNode* codetree = (GifLzwNode*)GIF_TEMP_MALLOC(sizeof(GifLzwNode)*4096);
 
     memset(codetree, 0, sizeof(GifLzwNode)*4096);
     int32_t curCode = -1;
@@ -752,6 +783,7 @@ inline void GifWriteLzwImage(FILE* f, uint8_t* image, uint32_t left, uint32_t to
     fputc(0, f); // image block terminator
 
     GIF_TEMP_FREE(codetree);
+    return true;
 }
 
 typedef struct
@@ -766,14 +798,26 @@ typedef struct
 
 // Creates a gif file.
 // The input GIFWriter is assumed to be uninitialized.
+// fstl patch: on Windows, filename is interpreted as UTF-8 (and opened via
+// _wfopen) so non-ANSI paths work; elsewhere it is passed to fopen as-is.
+// Callers should pass QString::toUtf8().
 // The delay value is the time between frames in hundredths of a second - note that not all viewers pay much attention to this value.
 inline bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, uint32_t height, uint32_t delay, int32_t bitDepth = 8, bool dither = false, bool transparent = false )
 {
     (void)bitDepth; (void)dither; // Mute "Unused argument" warnings
     writer->transparent = transparent;
-#if defined(_MSC_VER) && (_MSC_VER >= 1400)
-	writer->f = 0;
-    fopen_s(&writer->f, filename, "wb");
+    writer->f = NULL;
+    writer->oldImage = NULL;
+#if defined(_WIN32)
+    {
+        const int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, filename, -1, NULL, 0);
+        if(wlen <= 0) return false;
+        wchar_t* wpath = (wchar_t*)malloc(sizeof(wchar_t) * (size_t)wlen);
+        if(!wpath) return false;
+        if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, filename, -1, wpath, wlen) == wlen)
+            writer->f = _wfopen(wpath, L"wb");
+        free(wpath);
+    }
 #else
     writer->f = fopen(filename, "wb");
 #endif
@@ -782,7 +826,13 @@ inline bool GifBegin( GifWriter* writer, const char* filename, uint32_t width, u
     writer->firstFrame = true;
 
     // allocate
-    writer->oldImage = (uint8_t*)GIF_MALLOC(width*height*4);
+    writer->oldImage = (uint8_t*)GIF_MALLOC((size_t)width*height*4);
+    if(!writer->oldImage)
+    {
+        fclose(writer->f);
+        writer->f = NULL;
+        return false;
+    }
 
     fputs("GIF89a", writer->f);
 
@@ -840,10 +890,15 @@ inline bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t wid
     writer->firstFrame = false;
 
     GifPalette pal;
-    GifMakePalette((dither? NULL : oldImage), image, width, height, bitDepth, dither, &pal);
+    memset(&pal, 0, sizeof(pal));
+    if(!GifMakePalette((dither? NULL : oldImage), image, width, height, bitDepth, dither, &pal))
+        return false;
 
     if(dither)
-        GifDitherImage(oldImage, image, writer->oldImage, width, height, &pal);
+    {
+        if(!GifDitherImage(oldImage, image, writer->oldImage, width, height, &pal))
+            return false;
+    }
     else
         GifThresholdImage(oldImage, image, writer->oldImage, width, height, &pal);
 
@@ -852,16 +907,17 @@ inline bool GifWriteFrame( GifWriter* writer, const uint8_t* image, uint32_t wid
         // map low-alpha source pixels to the transparent palette index
         uint8_t* out = writer->oldImage;
         const uint8_t* src = image;
-        for(uint32_t ii=0; ii<width*height; ++ii, out+=4, src+=4)
+        for(size_t ii=0; ii<(size_t)width*height; ++ii, out+=4, src+=4)
         {
             if(src[3] < 128)
                 out[3] = kGifTransIndex;
         }
     }
 
-    GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal, writer->transparent);
+    if(!GifWriteLzwImage(writer->f, writer->oldImage, 0, 0, width, height, delay, &pal, writer->transparent))
+        return false;
 
-    return true;
+    return !ferror(writer->f);
 }
 
 // Writes the EOF code, closes the file handle, and frees temp memory used by a GIF.
@@ -871,14 +927,17 @@ inline bool GifEnd( GifWriter* writer )
 {
     if(!writer->f) return false;
 
+    // fstl patch: report write errors (e.g. disk full) instead of
+    // silently producing a truncated file
     fputc(0x3b, writer->f); // end of file
-    fclose(writer->f);
+    bool ok = !ferror(writer->f);
+    if(fclose(writer->f) != 0) ok = false;
     GIF_FREE(writer->oldImage);
 
     writer->f = NULL;
     writer->oldImage = NULL;
 
-    return true;
+    return ok;
 }
 
 #endif

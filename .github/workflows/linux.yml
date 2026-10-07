@@ -8,18 +8,25 @@ on:
 
 jobs:
     build:
-        runs-on: ubuntu-latest
+        runs-on: ${{ matrix.os }}
         strategy:
+            fail-fast: false
             matrix:
+                os: [ubuntu-24.04, ubuntu-26.04]
+                qt: [5, 6]
                 compiler: [gcc, clang]
         steps:
             - name: Checkout code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: Install dependencies
               run: |
                 sudo apt-get update
-                sudo apt-get install -y qt5-qmake qtbase5-dev build-essential clang clang-format
+                if [ "${{ matrix.qt }}" = "6" ]; then
+                    sudo apt-get install -y qt6-base-dev libgl-dev build-essential clang clang-format xvfb ffmpeg
+                else
+                    sudo apt-get install -y qt5-qmake qtbase5-dev build-essential clang clang-format xvfb ffmpeg
+                fi
 
             - name: Set compiler
               run: |
@@ -33,13 +40,21 @@ jobs:
                 echo "CC=$CC" >> $GITHUB_ENV
                 echo "CXX=$CXX" >> $GITHUB_ENV
 
-            - name: Build 
+            - name: Build
               run: |
-                cmake -S . -B build -DFSTL_CHECK_FORMAT=ON
-                cmake --build build --target fstl --config Release -- -j$(nproc)
-            
+                # Qt 6 is probed first by CMakeLists.txt; force Qt 5 on the Qt 5 leg
+                EXTRA=""
+                if [ "${{ matrix.qt }}" = "5" ]; then EXTRA="-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON"; fi
+                cmake -S . -B build -DFSTL_CHECK_FORMAT=ON -DFSTL_BUILD_TESTS=ON $EXTRA
+                cmake --build build --config Release -- -j$(nproc)
+
+            - name: Run tests (under Xvfb; QOpenGLWidget needs a real platform plugin)
+              run: |
+                cd build && xvfb-run -a -s "-screen 0 1280x1024x24" ctest --output-on-failure
+
             - name: Check format
+              # clang-format output differs between Ubuntu releases; check on one leg
+              if: matrix.os == 'ubuntu-24.04' && matrix.qt == '6' && matrix.compiler == 'gcc'
               run: |
-                # Print the version for troubleshooting purposes
                 clang-format --version
                 cmake --build build --target check-format

@@ -39,6 +39,10 @@ public:
     }
 
     int triCount() const;
+    size_t vertexCount() const
+    {
+        return vertices.size() / 3;
+    }
     bool empty() const;
 
 private:

@@ -5,6 +5,7 @@
 #include <QCollator>
 #include <QFileSystemWatcher>
 #include <QMainWindow>
+#include <QTimer>
 
 #include "keybindingsdialog.h"
 
@@ -18,6 +19,7 @@ class Window : public QMainWindow
     Q_OBJECT
 public:
     explicit Window(QWidget* parent = 0);
+    ~Window() override;
     bool load_stl(const QString& filename, bool is_reload = false);
     bool load_prev(void);
     bool load_next(void);
@@ -67,6 +69,8 @@ private slots:
     void on_fullscreen();
     void on_hide_menuBar();
     void on_drawModePrefs();
+    void on_loader_finished();
+    void on_autoreload_timeout();
 
 private:
     void rebuild_recent_files();
@@ -135,6 +139,12 @@ private:
     QStringList lookup_folder_files;
 
     QFileSystemWatcher* watcher;
+
+    /*  Autoreload debounce: a burst of change notifications (an editor
+     *  writing in several steps) triggers a single reload, and a change
+     *  arriving while a load is running is reloaded once it finishes. */
+    QTimer reload_timer;
+    bool reload_pending = false;
 
     Canvas* canvas;
 

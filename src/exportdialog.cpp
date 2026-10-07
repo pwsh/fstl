@@ -7,6 +7,7 @@
 #include <QSettings>
 #include <QSpinBox>
 
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -39,22 +40,40 @@ std::vector<float> RotationExportOptions::pngAngles() const
 std::vector<float> RotationExportOptions::gifAngles() const
 {
     std::vector<float> angles;
-    const float s = std::max(0.1f, step);
+    if (!std::isfinite(step) || !std::isfinite(sweep) || !std::isfinite(startAngle) || !std::isfinite(endAngle)) {
+        return angles;
+    }
+    const double s = std::max(0.1, double(step));
+    // Angles are generated as lo + i*s from a precomputed count (rather than
+    // by accumulating a float), so huge ranges can't loop forever; sequences
+    // longer than maxGifFrames are rejected outright.
     if (bounce) {
-        const float lo = std::min(startAngle, endAngle);
-        const float hi = std::max(startAngle, endAngle);
-        // Forward leg, including both endpoints...
-        for (float a = lo; a < hi; a += s) {
-            angles.push_back(a);
+        const double lo = std::min(startAngle, endAngle);
+        const double hi = std::max(startAngle, endAngle);
+        const double n = std::ceil((hi - lo) / s); // forward-leg steps
+        if (!(n <= maxGifFrames / 2)) {
+            return angles;
         }
-        angles.push_back(hi);
+        const int count = int(n);
+        angles.reserve(2 * count);
+        // Forward leg, including both endpoints...
+        for (int i = 0; i < count; ++i) {
+            angles.push_back(float(lo + i * s));
+        }
+        angles.push_back(float(hi));
         // ...then back, excluding the endpoints so the loop is seamless
-        for (float a = hi - s; a > lo; a -= s) {
-            angles.push_back(a);
+        for (int i = 1; i < count; ++i) {
+            angles.push_back(float(hi - i * s));
         }
     } else {
-        for (float a = 0; a < sweep; a += s) {
-            angles.push_back(a);
+        const double n = std::ceil(double(sweep) / s);
+        if (!(n <= maxGifFrames)) {
+            return angles;
+        }
+        const int count = std::max(0, int(n));
+        angles.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            angles.push_back(float(i * s));
         }
     }
     return angles;

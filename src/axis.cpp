@@ -89,7 +89,8 @@ void Axis::draw(QMatrix4x4 transMat, QMatrix4x4 viewMat, QMatrix4x4 orientMat, Q
     loadMatrixUniforms(transMat, viewMat);
     loadAttribPtr();
 
-    glDrawArrays(GL_LINES, 0, 3 * 6);
+    // 3 lines, 2 vertices each
+    glDrawArrays(GL_LINES, 0, 3 * 2);
 
     vertices.release();
     // Next, we draw the hud axis-flower
@@ -107,7 +108,7 @@ void Axis::draw(QMatrix4x4 transMat, QMatrix4x4 viewMat, QMatrix4x4 orientMat, Q
     hudMat.scale(hudSize, hudSize, 1);
     loadMatrixUniforms(orientMat, aspectMat * hudMat);
     loadAttribPtr();
-    glDrawArrays(GL_LINES, 0, 3 * 6);
+    glDrawArrays(GL_LINES, 0, 3 * 2);
     flowerAxisVertices.release();
     for (int aIdx = 0; aIdx < 3; aIdx++) {
         QVector3D transVec = QVector3D();
@@ -119,8 +120,10 @@ void Axis::draw(QMatrix4x4 transMat, QMatrix4x4 viewMat, QMatrix4x4 orientMat, Q
         b.bind();
         loadMatrixUniforms(labelTransMat, aspectMat * hudMat);
         loadAttribPtr();
-        glDrawArrays(GL_LINES, 0, axisSegCount[aIdx] * 2 * 6);
+        glDrawArrays(GL_LINES, 0, axisSegCount[aIdx] * 2);
         b.release();
     }
+    glDisableVertexAttribArray(vp);
+    glDisableVertexAttribArray(vc);
     shader.release();
 }

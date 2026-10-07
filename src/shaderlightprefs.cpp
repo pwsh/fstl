@@ -102,8 +102,9 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     spinBrightness->setDecimals(2);
     spinBrightness->setValue(canvas->getLightBrightness());
     middleLayout->addWidget(spinBrightness, 3, 1, 1, 2);
-    connect(spinBrightness, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this](double b) { canvas->setLightBrightness(b); });
+    connect(spinBrightness, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double b) {
+        canvas->setLightBrightness(b);
+    });
 
     QPushButton* buttonResetBrightness = new QPushButton("Reset");
     middleLayout->addWidget(buttonResetBrightness, 3, 3);
@@ -120,8 +121,9 @@ ShaderLightPrefs::ShaderLightPrefs(QWidget* parent, Canvas* _canvas) : QDialog(p
     spinOpacity->setDecimals(2);
     spinOpacity->setValue(canvas->getModelOpacity());
     middleLayout->addWidget(spinOpacity, 4, 1, 1, 2);
-    connect(spinOpacity, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this](double o) { canvas->setModelOpacity(o); });
+    connect(spinOpacity, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double o) {
+        canvas->setModelOpacity(o);
+    });
 
     QPushButton* buttonResetOpacity = new QPushButton("Reset");
     middleLayout->addWidget(buttonResetOpacity, 4, 3);

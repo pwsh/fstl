@@ -4,7 +4,10 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <future>
+#include <memory>
 
 #include "loader.h"
 #include "vertex.h"
@@ -30,6 +33,20 @@ void Loader::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+namespace
+{
+// Largest triangle count we accept.  Indices are stored as 32-bit GLuints
+// (so 3 * count must fit in a uint32), and anything this large would need
+// tens of gigabytes of RAM anyway.
+constexpr uint32_t max_tri_count = 200 * 1000 * 1000;
+static_assert(max_tri_count <= UINT32_MAX / 3, "vertex indices must fit in a GLuint");
+
+inline bool finite_vertex(const Vertex& v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+} // namespace
+
 void parallel_sort(Vertex* begin, Vertex* end, int threads)
 {
     if (threads < 2 || end - begin < 2) {
@@ -37,7 +54,7 @@ void parallel_sort(Vertex* begin, Vertex* end, int threads)
     } else {
         const auto mid = begin + (end - begin) / 2;
         if (threads == 2) {
-            auto future = std::async(parallel_sort, begin, mid, threads / 2);
+            auto future = std::async(std::launch::async, parallel_sort, begin, mid, threads / 2);
             std::sort(mid, end);
             future.wait();
         } else {
@@ -54,7 +71,8 @@ Mesh* mesh_from_verts(uint32_t tri_count, QVector<Vertex>& verts)
 {
     // Save indicies as the second element in the array
     // (so that we can reconstruct triangle order after sorting)
-    for (size_t i = 0; i < tri_count * 3; ++i) {
+    const size_t vert_count = size_t(tri_count) * 3;
+    for (size_t i = 0; i < vert_count; ++i) {
         verts[i].i = i;
     }
 
@@ -69,7 +87,7 @@ Mesh* mesh_from_verts(uint32_t tri_count, QVector<Vertex>& verts)
     parallel_sort(verts.data(), verts.data() + verts.size(), threads);
 
     // This vector will store triangles as sets of 3 indices
-    std::vector<GLuint> indices(tri_count * 3);
+    std::vector<GLuint> indices(vert_count);
 
     // Go through the sorted vertex list, deduplicating and creating
     // an indexed geometry representation for the triangles.
@@ -144,18 +162,19 @@ Mesh* Loader::read_stl_binary(QFile& file)
 
     // Load the triangle count from the .stl file
     file.seek(80);
-    uint32_t tri_count;
+    uint32_t tri_count = 0;
     data >> tri_count;
 
     // Verify that the file is the right size (in 64-bit arithmetic, so
-    // models beyond ~85M triangles don't overflow the check)
-    if (file.size() != 84 + qint64(tri_count) * 50) {
+    // models beyond ~85M triangles don't overflow the check), and reject
+    // absurd counts before tri_count * 3 is used to size anything
+    if (data.status() != QDataStream::Ok || tri_count > max_tri_count || file.size() != 84 + qint64(tri_count) * 50) {
         emit error_bad_stl();
         return NULL;
     }
 
     // Extract vertices into an array of xyz, unsigned pairs
-    QVector<Vertex> verts(tri_count * 3);
+    QVector<Vertex> verts(qsizetype(tri_count) * 3);
 
     // Stream the body in modest chunks rather than buffering the whole
     // file: at 50 bytes per triangle a full copy would briefly double the
@@ -173,7 +192,14 @@ Mesh* Loader::read_stl_binary(QFile& file)
             // Each 50-byte record: 12-byte normal, 3 vertices, 2-byte attribute
             const uint8_t* b = buffer.get() + i * 50 + 3 * sizeof(float);
             for (unsigned j = 0; j < 3; ++j) {
-                qFromLittleEndian<float>(b, 3, v++);
+                qFromLittleEndian<float>(b, 3, v);
+                // NaN/inf would break the strict weak ordering std::sort
+                // relies on when deduplicating vertices
+                if (!finite_vertex(*v)) {
+                    emit error_bad_stl();
+                    return NULL;
+                }
+                ++v;
                 b += 3 * sizeof(float);
             }
         }
@@ -212,7 +238,7 @@ Mesh* Loader::read_stl_ascii(QFile& file)
             const float x = line[1].toFloat(&ok_x);
             const float y = line[2].toFloat(&ok_y);
             const float z = line[3].toFloat(&ok_z);
-            if (!(okay = ok_x && ok_y && ok_z)) {
+            if (!(okay = ok_x && ok_y && ok_z && std::isfinite(x) && std::isfinite(y) && std::isfinite(z))) {
                 break;
             }
             verts.push_back(Vertex(x, y, z));
@@ -221,7 +247,10 @@ Mesh* Loader::read_stl_ascii(QFile& file)
             okay = false;
             break;
         }
-        tri_count++;
+        if (++tri_count > max_tri_count) {
+            okay = false;
+            break;
+        }
     }
 
     if (okay) {

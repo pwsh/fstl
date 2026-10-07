@@ -1,5 +1,173 @@
 # Changelog
 
+## 0.14.0 (2026-10-07)
+
+Hardening and dependency-update release following a full review for logic
+errors, security issues, memory leaks and optimizations, plus the View-menu
+features added since 0.13.0 (Up Axis toggle, Statistics dialog, momentum
+spin). Version bumped from 0.13.0.
+
+---
+
+### Security
+
+- **STL loader: heap buffer overflow on a crafted triangle count** —
+  `src/loader.cpp`. `tri_count * 3` was computed in 32-bit arithmetic, so a
+  file declaring 1,431,655,766 triangles (a sparse 71 GB file that takes 4 KB
+  on disk) sized the vertex array at 2 elements and then wrote the file body
+  past its end (confirmed with AddressSanitizer). Counts above 200 M are now
+  rejected up front and all size math uses `size_t`.
+- **NaN / infinite coordinates rejected** — `src/loader.cpp`. Both the binary
+  and ASCII readers now reject non-finite vertices, which broke the strict
+  weak ordering the parallel dedup sort relies on (undefined behaviour) and
+  produced NaN bounding boxes and a zero scale.
+- **Runtime directory hardening** — `src/main.cpp`. The fallback
+  `XDG_RUNTIME_DIR` (`/tmp/fstl-runtime-<uid>`) is now created with
+  `mkdir(0700)` and only used if `lstat` shows a real directory owned by the
+  user with no group/other access. A pre-created attacker directory is no
+  longer adopted.
+- **Settings import/export allow-list** — `src/window.cpp`. Importing a
+  shared `.ini` could set `externalCmd`, which Alt+S then executed; export
+  leaked `recentFiles` paths. Both now go through an allow-list of portable
+  keys; `externalCmd`, `recentFiles` and window geometry never travel.
+- **Drag-and-drop requires a local file** — remote URLs produced an empty
+  path and an out-of-range `QString` index.
+
+### Bug fixes
+
+- **MP4 export hung at 100 % CPU when ffmpeg exited early** —
+  `src/cliexport.cpp`, `src/window.cpp`. The back-pressure loop waited on
+  `bytesToWrite()` forever once the process was gone (any ffmpeg failure:
+  missing output directory, read-only target, full disk, ffmpeg without
+  libx264). Process state is now checked before every write and in the wait
+  loop; failures report ffmpeg's stderr tail and remove the partial file.
+  `--output-dir` is created up front.
+- **GIF bounce angle generation could loop forever** —
+  `src/exportdialog.cpp`. `a += step` stalled in float precision for large
+  ranges (`--from -1e8 --to 1e8 --step 0.5`) and never ended for infinite
+  values, growing memory on every pass. Angles are now `lo + i*step` with a
+  precomputed count, finite-input checks and a 10,000-frame cap.
+- **Closing the window while a model loads aborted the process** —
+  `src/window.cpp`. `Loader` is a `QThread` owned by the window; deleting it
+  mid-run hit `QThread: Destroyed while thread is still running`. `~Window`
+  now detaches and waits for loaders and hands any delivered mesh to the
+  canvas. New `fstl_test_loader_close` regression test.
+- **Concurrent loads and dropped autoreloads** — `src/window.cpp`. Open was
+  disabled by a queued signal (late) and re-enabled by the first finishing
+  loader, so two loaders could run at once and the older mesh could win; a
+  file change during a load was silently dropped, and a delete-then-write
+  made the watcher forget the path. Loads now disable Open synchronously,
+  autoreload is debounced (200 ms) and retried after a running load, and the
+  watched path is re-added after failed loads too.
+- **OpenGL overdraw past vertex buffers** — `src/axis.cpp`,
+  `src/backdrop.cpp`. The axis lines drew 18 vertices from a 6-vertex buffer,
+  the axis labels `segCount*12` from `segCount*2`, and the backdrop 8 from 4
+  (undefined behaviour; garbage lines or faults on drivers without robust
+  buffer access). Attribute arrays are also disabled after each draw so a
+  stale enabled attribute no longer points at the 4-vertex backdrop buffer
+  during the mesh `glDrawElements`.
+- **Momentum spin kept rotating the model during PNG/GIF/MP4 export**
+  (progress dialogs pump events), so frames were not an even rotation and
+  the GIF loop seam jumped. Spin stops when an export starts, on viewpoint
+  presets, on reset and when animation angles are set.
+- **Shortcuts died with the menu bar hidden** (F5, 0-6, 9, axes toggle): the
+  actions are now window-level.
+- **Live recording** — `src/animatedialog.cpp`: ffmpeg death is detected
+  (`finished`/`errorOccurred`) instead of being discovered at Stop; frames
+  are skipped when more than 64 MB is queued; the capture timer is precise;
+  while recording the animation advances exactly 1/30 s per frame so the
+  video plays at the configured speed; Stop finishes asynchronously instead
+  of blocking the UI for up to 60 s and then killing ffmpeg mid-finalization.
+- **Uninitialised / unbounded view state** — `src/canvas.*`: `scale` and
+  `default_scale` initialised (Center before the first load used garbage);
+  a zero-size bounding box no longer yields an infinite scale; zoom is
+  clamped to [1e-4, 1e4] so the shaders never see NaN.
+- **PNG series file names**: a base name containing `%2` was substituted
+  into the pattern; the name is now appended, not interpolated.
+- **GIF frame delay** rounded down (`100/fps`): `--fps 30` played at 33 fps,
+  `--fps 60` was clamped to ~10 fps by browsers. Now rounded with a 2 cs
+  minimum.
+- **GIF write errors** (full disk) printed "wrote" and exited 0: results of
+  `GifWriteFrame`/`GifEnd` are checked in both the CLI and GUI, and a GIF
+  failure no longer skips the MP4 for the same input.
+- **CLI argument validation** — `--sweep` (0, 360], `--step` > 0, `--fps`
+  1-240, `--duration` > 0 (≤ 100 k frames), finite `--from/--to/--rx/--ry/
+  --rz/--light-dir`, positive `--width/--height`, duplicate `-` stdin input,
+  unchecked stdin temp-file write: all now exit 2 with a message.
+- **Offscreen render size beyond GL limits** reported "could not save"; it
+  now reports the limit (`fbo->isValid()` check).
+- **Non-ASCII paths on Windows** failed in the GIF writer (`fopen` through
+  the ANSI code page): paths are UTF-8 and opened with `_wfopen`.
+- `QStandardPaths::standardLocations(...).first()` on possibly-empty lists
+  replaced by `writableLocation()` with a home-directory fallback.
+- Key-binding dialog now rejects bindings that collide with fixed shortcuts
+  (0-6, 9, F1, F5, Alt+S, Ctrl+Q, Ctrl+W, Ctrl+Shift+C, Esc).
+- `drawModePrefs_action` was created without a parent (leak).
+- `CPACK_NSIS_DISPLAY_NAME` referenced an undefined variable; MSVC Qt 6
+  builds now also copy `Qt6OpenGLWidgets.dll` post-build.
+
+### gif.h (vendored)
+
+Compared against upstream `charlietangora/gif-h` master (2026-09): no
+functional upstream fixes are missing. Local hardening: every `malloc` is
+null-checked, allocations use `size_t` (`width*height*4` overflowed `int`
+for ≥ 32 k px sides), the palette is zero-initialised, `GifEnd` checks
+`ferror` and `fclose`. Public signatures unchanged. The file is excluded
+from the clang-format check.
+
+### Performance
+
+- `GLMesh` caches the index count instead of issuing a
+  `glGetBufferParameteriv` driver query every frame.
+- `Canvas::paintGL` no longer starts a `QPainter` when there is no status
+  text and statistics are off.
+- Translucent meshes render with depth writes off while blending.
+- `parallel_sort` forces `std::launch::async` on the two-thread branch
+  (`std::async` without a policy may run deferred, i.e. serially).
+
+### Dependency and toolchain updates
+
+- **Windows cross-build Qt 6.4.2 → 6.10.3** (`cross/`). Host moc/rcc/uic
+  now come from the same-version official Linux Qt (installed with
+  aqtinstall) instead of Ubuntu's 6.4.2 packages. aqtinstall pinned to
+  3.3.0 (the newest release; it cannot yet resolve the 6.11/6.12 Windows
+  repository layout, which is why 6.10.3 and not 6.11.3). The rcc zlib
+  option is still required (the MinGW Qt lacks zstd). Bundle verified with
+  the Wine smoke test. Qt 6.4 is end-of-life and received no fixes for the
+  bundled libpng/freetype/harfbuzz.
+- **Linux release artifacts are now built in the same Ubuntu 24.04
+  container** (`cross/build-linux.sh`) against Qt 6.4 / glibc 2.39, so the
+  standalone binary and `.deb` keep working on Ubuntu 24.04+, Debian 12+ and
+  newer, rather than requiring the build host's Qt 6.10.
+- **CI** (`.github/workflows/linux.yml`): `actions/checkout@v7`; runner
+  matrix pinned to `ubuntu-24.04` and `ubuntu-26.04` (`ubuntu-latest`
+  migrates to 26.04 between 2026-10-19 and 2026-11-19); Qt 5 and Qt 6 legs;
+  tests built and run under Xvfb; format check on one leg (clang-format
+  output differs between releases).
+- **Tests registered with ctest**: `export_verification`,
+  `close_time_teardown`, `close_while_loading`, `loader_robustness` (new
+  `test/test_loader.cpp`: truncated/short files, NaN/inf, sparse files
+  declaring 0xFFFFFFFF and 1,431,655,766 triangles, missing file), plus CLI
+  smoke tests (`cli_export_png`, `cli_rejects_bad_stl`).
+- `.clang-format`: `Standard: c++17` (was `Cpp11`).
+- CMake 3.16 minimum retained (CMake 4 only dropped < 3.5).
+
+### Verification
+
+- Clean build with `-Wall -Wextra` on Qt 6.10 (host) and Qt 6.4 (container);
+  Qt 5.15 build compiles warning-free.
+- AddressSanitizer/UBSan build: 16-file malformed-STL corpus, full
+  PNG/GIF/MP4 export and all ctest tests run with no reports.
+- Windows bundle (Qt 6.10.3) passes the Wine smoke test.
+
+### Behaviour changes
+
+- `--sweep` above 360 is rejected (exit 2) instead of clamped.
+- `--output-dir` is created if missing.
+- A failed live recording deletes its partial `.mp4`.
+- Settings export no longer includes `externalCmd`, `recentFiles` or dialog
+  geometry; import ignores them.
+
 ## 0.13.0 (2026-06-12)
 
 Major modernization and feature release: Qt 6 readiness, bug fixes, image

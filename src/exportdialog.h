@@ -12,15 +12,20 @@ class QDoubleSpinBox;
 
 /*  Options shared by the PNG-sequence and animated-GIF exporters */
 struct RotationExportOptions {
-    QVector3D axis;          // view-space rotation axis
-    bool bounce = false;     // false: sweep then loop; true: bounce between angles
-    float sweep = 360.0f;    // total rotation in loop mode (degrees, <= 360)
-    float startAngle = -90;  // bounce mode: first endpoint (degrees)
-    float endAngle = 90;     // bounce mode: second endpoint (degrees)
-    int frames = 8;          // PNG mode: number of images
-    float step = 3.0f;       // GIF mode: degrees per frame
-    int fps = 25;            // GIF playback speed
-    int gifWidth = 480;      // GIF output width in pixels (height keeps aspect)
+    QVector3D axis;         // view-space rotation axis
+    bool bounce = false;    // false: sweep then loop; true: bounce between angles
+    float sweep = 360.0f;   // total rotation in loop mode (degrees, <= 360)
+    float startAngle = -90; // bounce mode: first endpoint (degrees)
+    float endAngle = 90;    // bounce mode: second endpoint (degrees)
+    int frames = 8;         // PNG mode: number of images
+    float step = 3.0f;      // GIF mode: degrees per frame
+    int fps = 25;           // GIF playback speed
+    int gifWidth = 480;     // GIF output width in pixels (height keeps aspect)
+
+    /*  Upper bound on the number of GIF frames; gifAngles() returns an
+     *  empty list for options (huge ranges, tiny steps, non-finite
+     *  values) that would exceed it. */
+    static constexpr int maxGifFrames = 10000;
 
     /*  The sequence of rotation angles (relative to the current view)
      *  that realizes these options, for either exporter. */
@@ -48,8 +53,8 @@ private:
  *  Speeds follow from degrees/duration, so e.g. x=720 with y=360 spins
  *  around X twice as fast as around Y. */
 struct Mp4ExportOptions {
-    double duration = 8;  // seconds
-    double degreesX = 0;  // total rotation, may exceed 360
+    double duration = 8; // seconds
+    double degreesX = 0; // total rotation, may exceed 360
     double degreesY = 360;
     double degreesZ = 0;
     int fps = 30;

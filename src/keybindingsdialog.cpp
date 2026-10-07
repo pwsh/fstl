@@ -28,7 +28,9 @@ void apply_saved_key_bindings(const QList<BindableAction>& actions)
     }
 }
 
-KeyBindingsDialog::KeyBindingsDialog(QWidget* parent, const QList<BindableAction>& actions) : QDialog(parent), acts(actions)
+KeyBindingsDialog::KeyBindingsDialog(QWidget* parent, const QList<BindableAction>& actions,
+                                     const QList<FixedShortcut>& fixedShortcuts) :
+    QDialog(parent), acts(actions), fixed(fixedShortcuts)
 {
     setWindowTitle("Keyboard Shortcuts");
     resize(420, 520);
@@ -76,6 +78,15 @@ void KeyBindingsDialog::accept()
                 QMessageBox::warning(this, tr("Duplicate shortcut"),
                                      tr("\"%1\" and \"%2\" are both bound to %3.\nPlease change one of them.")
                                          .arg(acts[i].label, acts[j].label, seq.toString()));
+                return;
+            }
+        }
+        for (const auto& f : fixed) {
+            if (seq == f.second) {
+                QMessageBox::warning(this, tr("Shortcut in use"),
+                                     tr("%1 is already used by \"%2\", which cannot be rebound.\n"
+                                        "Please choose another key for \"%3\".")
+                                         .arg(seq.toString(), f.first, acts[i].label));
                 return;
             }
         }

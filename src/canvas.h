@@ -1,12 +1,12 @@
 #ifndef CANVAS_H
 #define CANVAS_H
 
+#include <QElapsedTimer>
 #include <QImage>
 #include <QMatrix4x4>
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLWidget>
-#include <QElapsedTimer>
 #include <QPropertyAnimation>
 #include <QSurfaceFormat>
 #include <QTimer>
@@ -166,7 +166,7 @@ private:
     QMatrix4x4 view_matrix() const;
     void resetTransform();
     void applyUpAxis(QMatrix4x4& m) const;
-    void updateFrameStats();      // refresh fps and angular velocity
+    void updateFrameStats(); // refresh fps and angular velocity
     QString statisticsText() const;
     QPointF changeMouseCoordinates(QPoint p);
     void calcArcballTransform(QPointF p1, QPointF p2);
@@ -227,7 +227,7 @@ private:
     float last_drag_speed = 0; // deg/s, from the final drag motion (the flick)
 
     QVector3D center, default_center;
-    float scale, default_scale;
+    float scale = 1, default_scale = 1;
     float zoom;
     QMatrix4x4 currentTransform;
 
@@ -250,9 +250,9 @@ private:
     QTimer stats_refresh_timer; // ~30 Hz repaint while a live stat is shown
     QElapsedTimer frameClock;   // dt between paints, for fps
     float fpsValue = 0;
-    QElapsedTimer velClock;   // fixed window for a steady rotation-speed reading
-    QMatrix4x4 velRefOrient;  // orientation at the start of the window
-    QVector3D angVelDeg;      // angular velocity (deg/s) in view space
+    QElapsedTimer velClock;  // fixed window for a steady rotation-speed reading
+    QMatrix4x4 velRefOrient; // orientation at the start of the window
+    QVector3D angVelDeg;     // angular velocity (deg/s) in view space
 };
 
 #endif // CANVAS_H

@@ -47,6 +47,16 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.14.0" date="2026-10-07">
+      <description>
+        <p>
+          View menu: Up Axis toggle, Statistics dialog, momentum spin. Hardening
+          of the STL loader and command-line exporter against malformed input,
+          MP4 export no longer hangs when ffmpeg fails, safe close while a model
+          is loading, and OpenGL draw fixes. Windows build moved to Qt 6.10.
+        </p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-06-12">
       <description>
         <p>

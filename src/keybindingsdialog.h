@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QKeySequence>
 #include <QList>
+#include <QPair>
 
 class QAction;
 class QKeySequenceEdit;
@@ -21,13 +22,18 @@ struct BindableAction {
  *  the actions; called once at startup. */
 void apply_saved_key_bindings(const QList<BindableAction>& actions);
 
+/*  A shortcut that is not rebindable (label, key sequence); new
+ *  bindings must not collide with these. */
+using FixedShortcut = QPair<QString, QKeySequence>;
+
 /*  Dialog listing every bindable action with an editable key field,
  *  plus reset-to-defaults. Saves and applies on OK. */
 class KeyBindingsDialog : public QDialog
 {
     Q_OBJECT
 public:
-    KeyBindingsDialog(QWidget* parent, const QList<BindableAction>& actions);
+    KeyBindingsDialog(QWidget* parent, const QList<BindableAction>& actions,
+                      const QList<FixedShortcut>& fixedShortcuts = QList<FixedShortcut>());
 
     void accept() override;
 
@@ -36,6 +42,7 @@ private slots:
 
 private:
     QList<BindableAction> acts;
+    QList<FixedShortcut> fixed;
     QList<QKeySequenceEdit*> edits;
 };
 

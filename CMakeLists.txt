@@ -26,6 +26,8 @@ if(FSTL_CHECK_FORMAT)
         exe/*.h
         exe/*.cpp
     )
+    # gif.h is vendored third-party code kept close to upstream; don't reformat it
+    list(FILTER ALL_SOURCE_FILES EXCLUDE REGEX "/gif\\.h$")
 
     add_custom_target(check-format
         COMMAND ${CLANG_FORMAT_EXE}
@@ -48,7 +50,7 @@ endif()
 
 # Set the version number
 set (FSTL_VERSION_MAJOR "0")
-set (FSTL_VERSION_MINOR "13")
+set (FSTL_VERSION_MINOR "14")
 set (FSTL_VERSION_PATCH "0")
 set (PROJECT_VERSION "${FSTL_VERSION_MAJOR}.${FSTL_VERSION_MINOR}.${FSTL_VERSION_PATCH}")
 
@@ -167,6 +169,27 @@ if(FSTL_BUILD_TESTS)
     add_executable(fstl_screenshot_gen test/screenshot_gen.cpp ${Teardown_Sources} ${Project_Headers} ${Project_Resources})
     target_compile_definitions(fstl_screenshot_gen PRIVATE -DFSTL_VERSION="${PROJECT_VERSION}")
     target_link_libraries(fstl_screenshot_gen ${FSTL_QT_LIBRARIES} OpenGL::GL Threads::Threads)
+
+    # Close-while-loading regression test
+    add_executable(fstl_test_loader_close test/test_loader_close.cpp ${Teardown_Sources} ${Project_Headers} ${Project_Resources})
+    target_compile_definitions(fstl_test_loader_close PRIVATE -DFSTL_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(fstl_test_loader_close ${FSTL_QT_LIBRARIES} OpenGL::GL Threads::Threads)
+
+    # Loader robustness test (no GL needed)
+    add_executable(fstl_test_loader test/test_loader.cpp src/loader.cpp src/mesh.cpp src/loader.h src/mesh.h)
+    target_link_libraries(fstl_test_loader Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Threads::Threads)
+
+    # Register the tests with ctest (run with QT_QPA_PLATFORM=offscreen headless)
+    enable_testing()
+    add_test(NAME export_verification COMMAND fstl_test_export)
+    add_test(NAME close_time_teardown COMMAND fstl_test_teardown)
+    add_test(NAME close_while_loading COMMAND fstl_test_loader_close)
+    add_test(NAME loader_robustness COMMAND fstl_test_loader)
+    add_test(NAME cli_export_png COMMAND fstl ${CMAKE_CURRENT_SOURCE_DIR}/gl/sphere.stl
+        --export-png --output-dir ${CMAKE_CURRENT_BINARY_DIR} --output ctest_sphere)
+    add_test(NAME cli_rejects_bad_stl COMMAND fstl ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+        --export-png --output-dir ${CMAKE_CURRENT_BINARY_DIR} --output ctest_bad)
+    set_tests_properties(cli_rejects_bad_stl PROPERTIES WILL_FAIL TRUE)
 endif()
 
 #installer information that is platform independent
@@ -216,6 +239,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt${QT_VERSION_MAJOR}::Gui>        $<TARGET_FILE_DIR:${PROJECT_NAME}>
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt${QT_VERSION_MAJOR}::Widgets>    $<TARGET_FILE_DIR:${PROJECT_NAME}>
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:Qt${QT_VERSION_MAJOR}::OpenGL>     $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<$<EQUAL:${QT_VERSION_MAJOR},6>:$<TARGET_FILE:Qt6::OpenGLWidgets>> $<TARGET_FILE_DIR:${PROJECT_NAME}>
         )
     endif(MSVC)
 
@@ -227,7 +251,7 @@ if(WIN32)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "${PROJECT_NAME}")
     set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\fstl.exe")
     set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/fstl-app/fstl")
-    set(CPACK_NSIS_DISPLAY_NAME "fstl ${FSTL_VERSION}")
+    set(CPACK_NSIS_DISPLAY_NAME "fstl ${PROJECT_VERSION}")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_CURRENT_SOURCE_DIR}/exe/fstl.ico")
     set(CPACK_NSIS_MUI_UNIICON  "${CMAKE_CURRENT_SOURCE_DIR}/exe/fstl.ico")
     set(CPACK_NSIS_CREATE_ICONS_EXTRA

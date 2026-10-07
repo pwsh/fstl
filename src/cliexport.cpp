@@ -10,13 +10,14 @@
 #include <QSettings>
 #include <QStandardPaths>
 
-#include <algorithm>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryFile>
+#include <algorithm>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -25,8 +26,7 @@ bool cli_export_requested(int argc, char* argv[])
     for (int i = 1; i < argc; ++i) {
         // Export switches, and help/version requests, run without a GUI
         if (!strcmp(argv[i], "--export-png") || !strcmp(argv[i], "--export-gif") || !strcmp(argv[i], "--export-mp4") ||
-            !strcmp(argv[i], "-h") ||
-            !strcmp(argv[i], "--help") || !strcmp(argv[i], "--help-all") || !strcmp(argv[i], "-v") ||
+            !strcmp(argv[i], "-h") || !strcmp(argv[i], "--help") || !strcmp(argv[i], "--help-all") || !strcmp(argv[i], "-v") ||
             !strcmp(argv[i], "--version")) {
             return true;
         }
@@ -56,17 +56,66 @@ QColor parse_color(const QString& s, bool* ok)
     return c;
 }
 
+// Upper bound on MP4 frames (about 55 minutes at 30 fps)
+constexpr int max_mp4_frames = 100000;
+// Largest accepted --fps
+constexpr int max_fps = 240;
+// Pending ffmpeg input allowed to queue up before waiting for it to drain
+constexpr qint64 max_pending_bytes = 64 * 1024 * 1024;
+
+/*  Parses option o as a finite double, reporting an error if it isn't one */
+bool option_double(const QCommandLineParser& parser, const QCommandLineOption& o, double* out)
+{
+    bool ok = false;
+    const QString text = parser.value(o).trimmed();
+    const double v = text.toDouble(&ok);
+    if (!ok || !std::isfinite(v)) {
+        err("invalid --" + o.names().last() + " '" + text + "' (expected a number)");
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+/*  Returns the last few lines of a process's stderr, indented for display */
+QString stderr_tail(QProcess& proc, int lines = 10)
+{
+    QStringList all = QString::fromLocal8Bit(proc.readAllStandardError()).split('\n', Qt::SkipEmptyParts);
+    if (all.size() > lines) {
+        all = all.mid(all.size() - lines);
+    }
+    return all.isEmpty() ? QString() : "\n  " + all.join("\n  ");
+}
+
 /*  Loads an STL synchronously using the same Loader as the GUI. */
 Mesh* load_mesh_file(const QString& path, QString* error)
 {
     Mesh* mesh = nullptr;
     Loader loader(nullptr, path, false);
-    QObject::connect(&loader, &Loader::got_mesh, &loader, [&](Mesh* m, bool) { mesh = m; }, Qt::DirectConnection);
-    QObject::connect(&loader, &Loader::error_bad_stl, &loader, [&] { *error = "invalid or corrupted .stl file"; },
-                     Qt::DirectConnection);
-    QObject::connect(&loader, &Loader::error_empty_mesh, &loader, [&] { *error = "file contains no triangles"; },
-                     Qt::DirectConnection);
-    QObject::connect(&loader, &Loader::error_missing_file, &loader, [&] { *error = "file not found"; }, Qt::DirectConnection);
+    QObject::connect(
+        &loader, &Loader::got_mesh, &loader,
+        [&](Mesh* m, bool) {
+            mesh = m;
+        },
+        Qt::DirectConnection);
+    QObject::connect(
+        &loader, &Loader::error_bad_stl, &loader,
+        [&] {
+            *error = "invalid or corrupted .stl file";
+        },
+        Qt::DirectConnection);
+    QObject::connect(
+        &loader, &Loader::error_empty_mesh, &loader,
+        [&] {
+            *error = "file contains no triangles";
+        },
+        Qt::DirectConnection);
+    QObject::connect(
+        &loader, &Loader::error_missing_file, &loader,
+        [&] {
+            *error = "file not found";
+        },
+        Qt::DirectConnection);
     loader.run(); // synchronous: run() directly, not start()
     return mesh;
 }
@@ -103,19 +152,18 @@ QString output_path(const QString& outputName, const QString& outputDir, const Q
 int run_cli_export(const QStringList& args)
 {
     QCommandLineParser parser;
-    parser.setApplicationDescription(
-        "fstl - fast .stl viewer and exporter\n"
-        "\n"
-        "GUI mode (default):   fstl [-f|--foreground] [file.stl]\n"
-        "  Opens the viewer. -f/--foreground keeps it attached to the terminal\n"
-        "  (it forks into the background by default).\n"
-        "\n"
-        "Export mode: with --export-png and/or --export-gif, fstl renders STL files\n"
-        "to PNG images or animated GIFs without opening a window. Reads from files,\n"
-        "directories, or stdin (pass '-').\n"
-        "With multiple --angles, PNGs are numbered name_000_0deg.png, name_001_45deg.png, ...\n"
-        "Exit code: 0 on success, 1 if any input failed, 2 for bad arguments.\n"
-        "See fstl(1) for full documentation.");
+    parser.setApplicationDescription("fstl - fast .stl viewer and exporter\n"
+                                     "\n"
+                                     "GUI mode (default):   fstl [-f|--foreground] [file.stl]\n"
+                                     "  Opens the viewer. -f/--foreground keeps it attached to the terminal\n"
+                                     "  (it forks into the background by default).\n"
+                                     "\n"
+                                     "Export mode: with --export-png and/or --export-gif, fstl renders STL files\n"
+                                     "to PNG images or animated GIFs without opening a window. Reads from files,\n"
+                                     "directories, or stdin (pass '-').\n"
+                                     "With multiple --angles, PNGs are numbered name_000_0deg.png, name_001_45deg.png, ...\n"
+                                     "Exit code: 0 on success, 1 if any input failed, 2 for bad arguments.\n"
+                                     "See fstl(1) for full documentation.");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("files", "Input .stl files ('-' reads stdin)", "[files...]");
@@ -148,10 +196,9 @@ int run_cli_export(const QStringList& args)
     const QCommandLineOption optRy("ry", "MP4: total Y rotation in degrees (default 360).", "deg", "360");
     const QCommandLineOption optRz("rz", "MP4: total Z rotation in degrees (default 0).", "deg", "0");
 
-    for (const auto& o : {optPng,    optGif,   optMp4,    optInput,      optInputDir, optOutput,   optOutputDir,
-                          optColor,  optBg,    optWidth,  optHeight,     optAxis,     optAngles,   optSweep,
-                          optBounce, optFrom,  optTo,     optStep,       optFps,      optOpacity,  optBrightness,
-                          optLightDir, optSettings, optDuration, optRx,  optRy,       optRz}) {
+    for (const auto& o : {optPng,   optGif,     optMp4,        optInput,    optInputDir, optOutput,   optOutputDir, optColor, optBg,
+                          optWidth, optHeight,  optAxis,       optAngles,   optSweep,    optBounce,   optFrom,      optTo,    optStep,
+                          optFps,   optOpacity, optBrightness, optLightDir, optSettings, optDuration, optRx,        optRy,    optRz}) {
         parser.addOption(o);
     }
     parser.process(args);
@@ -218,26 +265,34 @@ int run_cli_export(const QStringList& args)
         }
     }
     if (parser.isSet(optOpacity)) {
-        style.opacity = std::clamp(parser.value(optOpacity).toDouble(&ok), 0.0, 1.0);
-        if (!ok) {
-            err("invalid --opacity");
+        double opacity = 1;
+        if (!option_double(parser, optOpacity, &opacity)) {
             return 2;
         }
+        style.opacity = std::clamp(opacity, 0.0, 1.0);
     }
     if (parser.isSet(optBrightness)) {
-        style.brightness = parser.value(optBrightness).toDouble(&ok);
-        if (!ok || style.brightness < 0) {
-            err("invalid --brightness");
+        if (!option_double(parser, optBrightness, &style.brightness)) {
+            return 2;
+        }
+        if (style.brightness < 0) {
+            err("--brightness must not be negative");
             return 2;
         }
     }
     if (parser.isSet(optLightDir)) {
         const QStringList parts = parser.value(optLightDir).split(',');
-        if (parts.size() != 3) {
-            err("--light-dir expects x,y,z");
+        float xyz[3] = {0, 0, 0};
+        bool dir_ok = parts.size() == 3;
+        for (int i = 0; dir_ok && i < 3; ++i) {
+            xyz[i] = parts[i].trimmed().toFloat(&dir_ok);
+            dir_ok = dir_ok && std::isfinite(xyz[i]);
+        }
+        if (!dir_ok) {
+            err("--light-dir expects three numbers x,y,z");
             return 2;
         }
-        style.lightDirection = QVector3D(parts[0].toFloat(), parts[1].toFloat(), parts[2].toFloat());
+        style.lightDirection = QVector3D(xyz[0], xyz[1], xyz[2]);
     }
     const QColor background = style.background;
 
@@ -259,7 +314,7 @@ int run_cli_export(const QStringList& args)
     std::vector<float> pngAngles;
     for (const QString& part : parser.value(optAngles).split(',', Qt::SkipEmptyParts)) {
         const float a = part.trimmed().toFloat(&ok);
-        if (!ok) {
+        if (!ok || !std::isfinite(a)) {
             err("invalid angle '" + part.trimmed() + "' in --angles");
             return 2;
         }
@@ -273,20 +328,61 @@ int run_cli_export(const QStringList& args)
     RotationExportOptions gifOpt;
     gifOpt.axis = axis;
     gifOpt.bounce = parser.isSet(optBounce);
-    gifOpt.sweep = std::min(360.0f, parser.value(optSweep).toFloat());
-    gifOpt.startAngle = parser.value(optFrom).toFloat();
-    gifOpt.endAngle = parser.value(optTo).toFloat();
-    gifOpt.step = parser.value(optStep).toFloat();
-    gifOpt.fps = parser.isSet(optFps) ? std::max(1, parser.value(optFps).toInt()) : 25;
-    const int mp4Fps = parser.isSet(optFps) ? std::max(1, parser.value(optFps).toInt()) : 30;
-    const double mp4Duration = std::max(0.1, parser.value(optDuration).toDouble());
-    const QVector3D mp4Degrees(parser.value(optRx).toFloat(), parser.value(optRy).toFloat(), parser.value(optRz).toFloat());
+    double sweep = 0, from = 0, to = 0, step = 0, mp4Duration = 0, rx = 0, ry = 0, rz = 0;
+    if (!option_double(parser, optSweep, &sweep) || !option_double(parser, optFrom, &from) || !option_double(parser, optTo, &to) ||
+        !option_double(parser, optStep, &step) || !option_double(parser, optDuration, &mp4Duration) ||
+        !option_double(parser, optRx, &rx) || !option_double(parser, optRy, &ry) || !option_double(parser, optRz, &rz)) {
+        return 2;
+    }
+    if (!(sweep > 0 && sweep <= 360)) {
+        err("--sweep must be greater than 0 and at most 360");
+        return 2;
+    }
+    if (!(step > 0)) {
+        err("--step must be greater than 0");
+        return 2;
+    }
+    if (!(mp4Duration > 0)) {
+        err("--duration must be greater than 0");
+        return 2;
+    }
+    int fps = 0;
+    if (parser.isSet(optFps)) {
+        fps = parser.value(optFps).trimmed().toInt(&ok);
+        if (!ok || fps < 1 || fps > max_fps) {
+            err(QString("--fps must be a whole number from 1 to %1").arg(max_fps));
+            return 2;
+        }
+    }
+    gifOpt.sweep = sweep;
+    gifOpt.startAngle = from;
+    gifOpt.endAngle = to;
+    gifOpt.step = step;
+    gifOpt.fps = fps ? fps : 25;
+    const int mp4Fps = fps ? fps : 30;
+    const QVector3D mp4Degrees(rx, ry, rz);
+    if (!std::isfinite(mp4Degrees.x()) || !std::isfinite(mp4Degrees.y()) || !std::isfinite(mp4Degrees.z())) {
+        err("--rx/--ry/--rz out of range");
+        return 2;
+    }
+    const double mp4Frames = std::round(mp4Duration * mp4Fps);
+    if (do_mp4 && mp4Frames > max_mp4_frames) {
+        err(QString("--duration x --fps gives too many MP4 frames (max %1)").arg(max_mp4_frames));
+        return 2;
+    }
+    const std::vector<float> gifAngles = do_gif ? gifOpt.gifAngles() : std::vector<float>();
+    if (do_gif && gifAngles.empty()) {
+        err(QString("GIF settings (--sweep/--from/--to/--step) give too many frames (max %1)")
+                .arg(RotationExportOptions::maxGifFrames));
+        return 2;
+    }
 
     // Resolution limits: defaults are 1024 for PNG and 640 for GIF
-    const int userW = parser.isSet(optWidth) ? parser.value(optWidth).toInt() : 0;
-    const int userH = parser.isSet(optHeight) ? parser.value(optHeight).toInt() : 0;
-    if ((parser.isSet(optWidth) && userW < 1) || (parser.isSet(optHeight) && userH < 1)) {
-        err("--width/--height must be positive");
+    bool ok_w = true, ok_h = true;
+    const int userW = parser.isSet(optWidth) ? parser.value(optWidth).trimmed().toInt(&ok_w) : 0;
+    const int userH = parser.isSet(optHeight) ? parser.value(optHeight).trimmed().toInt(&ok_h) : 0;
+    if (!ok_w || !ok_h || (parser.isSet(optWidth) && userW < 1) || (parser.isSet(optHeight) && userH < 1)) {
+        err("--width/--height must be positive whole numbers");
         return 2;
     }
     const int pngMaxW = userW ? userW : (userH ? userH : 1024);
@@ -326,6 +422,19 @@ int run_cli_export(const QStringList& args)
         return 2;
     }
 
+    // Create the output directory up front so every exporter can rely on it
+    const QString outputDir = parser.value(optOutputDir);
+    if (!outputDir.isEmpty() && !QDir().mkpath(outputDir)) {
+        err("could not create output directory " + outputDir);
+        return 1;
+    }
+
+    // stdin can only be read once
+    if (inputs.count("-") > 1) {
+        err("'-' (stdin) may only be given once");
+        return 2;
+    }
+
     // Stdin support: spool the piped data to a temporary file for the Loader
     QTemporaryFile stdinFile;
     QList<ExportJob> jobs;
@@ -346,8 +455,10 @@ int run_cli_export(const QStringList& args)
                 err("could not create a temporary file for stdin");
                 return 1;
             }
-            stdinFile.write(data);
-            stdinFile.flush();
+            if (stdinFile.write(data) != data.size() || !stdinFile.flush()) {
+                err("could not write stdin to a temporary file");
+                return 1;
+            }
             job.input = "-";
             job.display = "stdin";
         } else {
@@ -379,7 +490,7 @@ int run_cli_export(const QStringList& args)
 
         if (do_png) {
             const QSize size = renderer.layoutForAngles(pngAngles, axis, pngMaxW, pngMaxH);
-            const QString path = output_path(parser.value(optOutput), parser.value(optOutputDir), job.input, job.display, ".png");
+            const QString path = output_path(parser.value(optOutput), outputDir, job.input, job.display, ".png");
             bool all_ok = true;
             for (size_t i = 0; i < pngAngles.size(); ++i) {
                 QString out = path;
@@ -388,7 +499,11 @@ int run_cli_export(const QStringList& args)
                     out += QString("_%1_%2deg.png").arg(i, 3, 10, QChar('0')).arg(qRound(pngAngles[i]));
                 }
                 const QImage frame = renderer.renderFrame(pngAngles[i], axis, size);
-                if (frame.isNull() || !frame.save(out)) {
+                if (frame.isNull()) {
+                    err(job.display + ": rendering failed: " + renderer.errorString());
+                    all_ok = false;
+                    break;
+                } else if (!frame.save(out)) {
                     err(job.display + ": could not save " + out);
                     all_ok = false;
                 } else {
@@ -399,35 +514,42 @@ int run_cli_export(const QStringList& args)
         }
 
         if (do_gif) {
-            const auto angles = gifOpt.gifAngles();
+            const auto& angles = gifAngles;
             const QSize size = renderer.layoutForAngles(angles, axis, gifMaxW, gifMaxH);
-            const QString path = output_path(parser.value(optOutput), parser.value(optOutputDir), job.input, job.display, ".gif");
-            const uint32_t delay_cs = std::max(1, 100 / gifOpt.fps);
+            const QString path = output_path(parser.value(optOutput), outputDir, job.input, job.display, ".gif");
+            // GIF delays are whole centiseconds; many viewers treat < 2 as 10
+            const uint32_t delay_cs = uint32_t(std::max(2L, std::lround(100.0 / gifOpt.fps)));
             const bool transparent = background.alpha() < 255;
 
+            // gif.h takes a UTF-8 path (converted to UTF-16 on Windows)
             GifWriter writer;
-            if (!GifBegin(&writer, path.toLocal8Bit().constData(), size.width(), size.height(), delay_cs, 8, false, transparent)) {
+            if (!GifBegin(&writer, path.toUtf8().constData(), size.width(), size.height(), delay_cs, 8, false, transparent)) {
                 err(job.display + ": could not open " + path + " for writing");
                 ++failures;
-                continue;
-            }
-            bool all_ok = true;
-            for (const float angle : angles) {
-                const QImage frame = renderer.renderFrame(angle, axis, size);
-                if (frame.isNull()) {
-                    all_ok = false;
-                    break;
-                }
-                GifWriteFrame(&writer, frame.constBits(), size.width(), size.height(), delay_cs);
-            }
-            GifEnd(&writer);
-            if (all_ok) {
-                info("wrote " + path +
-                     QString(" (%1x%2, %3 frames)").arg(size.width()).arg(size.height()).arg(int(angles.size())));
             } else {
-                err(job.display + ": rendering failed");
-                QFile::remove(path);
-                ++failures;
+                QString failure;
+                for (const float angle : angles) {
+                    const QImage frame = renderer.renderFrame(angle, axis, size);
+                    if (frame.isNull()) {
+                        failure = "rendering failed" + (renderer.errorString().isEmpty() ? QString() : ": " + renderer.errorString());
+                        break;
+                    }
+                    if (!GifWriteFrame(&writer, frame.constBits(), size.width(), size.height(), delay_cs)) {
+                        failure = "could not write " + path;
+                        break;
+                    }
+                }
+                if (!GifEnd(&writer) && failure.isEmpty()) {
+                    failure = "could not write " + path;
+                }
+                if (failure.isEmpty()) {
+                    info("wrote " + path +
+                         QString(" (%1x%2, %3 frames)").arg(size.width()).arg(size.height()).arg(int(angles.size())));
+                } else {
+                    err(job.display + ": " + failure);
+                    QFile::remove(path);
+                    ++failures;
+                }
             }
         }
 
@@ -439,7 +561,7 @@ int run_cli_export(const QStringList& args)
                 continue;
             }
 
-            const int total = std::max(1, int(std::lround(mp4Duration * mp4Fps)));
+            const int total = std::max(1, int(mp4Frames));
             std::vector<QVector3D> triples;
             triples.reserve(total);
             for (int i = 0; i < total; ++i) {
@@ -454,43 +576,88 @@ int run_cli_export(const QStringList& args)
                 ++failures;
                 continue;
             }
-            const QString path = output_path(parser.value(optOutput), parser.value(optOutputDir), job.input, job.display, ".mp4");
+            const QString path = output_path(parser.value(optOutput), outputDir, job.input, job.display, ".mp4");
 
+            // ffmpeg's stderr is captured so it can be reported on failure
             QProcess proc;
-            proc.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-            proc.start(ffmpeg_path, {"-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                                     QString("%1x%2").arg(size.width()).arg(size.height()), "-r", QString::number(mp4Fps),
-                                     "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags",
-                                     "+faststart", path});
+            proc.setProcessChannelMode(QProcess::SeparateChannels);
+            proc.setStandardOutputFile(QProcess::nullDevice());
+            proc.start(ffmpeg_path, {"-y",
+                                     "-loglevel",
+                                     "error",
+                                     "-f",
+                                     "rawvideo",
+                                     "-pix_fmt",
+                                     "rgba",
+                                     "-s",
+                                     QString("%1x%2").arg(size.width()).arg(size.height()),
+                                     "-r",
+                                     QString::number(mp4Fps),
+                                     "-i",
+                                     "-",
+                                     "-c:v",
+                                     "libx264",
+                                     "-preset",
+                                     "veryfast",
+                                     "-pix_fmt",
+                                     "yuv420p",
+                                     "-movflags",
+                                     "+faststart",
+                                     path});
             if (!proc.waitForStarted(5000)) {
                 err(job.display + ": could not start ffmpeg");
                 ++failures;
                 continue;
             }
 
-            bool all_ok = true;
+            QString failure;
+            const qint64 frame_bytes = qint64(size.width()) * size.height() * 4;
             for (const QVector3D& a : triples) {
-                QImage frame = renderer.renderFrameTriple(a, size);
-                if (frame.isNull()) {
-                    all_ok = false;
+                // ffmpeg may exit early (e.g. it can't write the output);
+                // stop feeding it rather than waiting on a dead pipe
+                if (proc.state() != QProcess::Running) {
+                    failure = "ffmpeg exited early";
                     break;
                 }
-                if (frame.size() != size) {
-                    frame = frame.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                                .convertToFormat(QImage::Format_RGBA8888);
+                QImage frame = renderer.renderFrameTriple(a, size);
+                if (frame.isNull()) {
+                    failure = "rendering failed" + (renderer.errorString().isEmpty() ? QString() : ": " + renderer.errorString());
+                    break;
                 }
-                proc.write((const char*)frame.constBits(), qint64(size.width()) * size.height() * 4);
-                while (proc.bytesToWrite() > 64 * 1024 * 1024) {
-                    proc.waitForBytesWritten(100);
+                if (frame.size() != size || frame.format() != QImage::Format_RGBA8888) {
+                    frame =
+                        frame.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+                }
+                if (proc.write((const char*)frame.constBits(), frame_bytes) != frame_bytes) {
+                    failure = "could not send frames to ffmpeg";
+                    break;
+                }
+                while (proc.bytesToWrite() > max_pending_bytes) {
+                    if (!proc.waitForBytesWritten(100) && proc.state() != QProcess::Running) {
+                        failure = "ffmpeg exited early";
+                        break;
+                    }
+                }
+                if (!failure.isEmpty()) {
+                    break;
                 }
             }
             proc.closeWriteChannel();
-            proc.waitForFinished(-1);
-            if (all_ok && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+            if (proc.state() != QProcess::NotRunning) {
+                proc.waitForFinished(-1);
+            }
+            if (failure.isEmpty() && (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)) {
+                failure = "ffmpeg failed";
+            }
+            if (failure.isEmpty()) {
                 info("wrote " + path +
                      QString(" (%1x%2, %3s @ %4fps)").arg(size.width()).arg(size.height()).arg(mp4Duration).arg(mp4Fps));
             } else {
-                err(job.display + ": MP4 encoding failed");
+                err(job.display + ": MP4 encoding failed (" + failure + ")" + stderr_tail(proc));
+                if (proc.state() != QProcess::NotRunning) {
+                    proc.kill();
+                    proc.waitForFinished(5000);
+                }
                 QFile::remove(path);
                 ++failures;
             }

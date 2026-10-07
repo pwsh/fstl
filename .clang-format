@@ -2,7 +2,7 @@
 ---
 BasedOnStyle: LLVM
 Language: Cpp
-Standard: Cpp11
+Standard: c++17
 
 ColumnLimit: 135
 

@@ -49,8 +49,9 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
 {
     setFormat(format);
     QFile styleFile(":/qt/style.qss");
-    styleFile.open(QFile::ReadOnly);
-    setStyleSheet(styleFile.readAll());
+    if (styleFile.open(QFile::ReadOnly)) {
+        setStyleSheet(styleFile.readAll());
+    }
     currentTransform = QMatrix4x4();
 
     QSettings settings;
@@ -93,7 +94,9 @@ Canvas::Canvas(const QSurfaceFormat& format, QWidget* parent) :
     anim.setDuration(100);
 
     stats_refresh_timer.setInterval(33); // ~30 Hz live fps/rotation readout
-    connect(&stats_refresh_timer, &QTimer::timeout, this, [this] { update(); });
+    connect(&stats_refresh_timer, &QTimer::timeout, this, [this] {
+        update();
+    });
 
     spin_timer.setInterval(16);
     connect(&spin_timer, &QTimer::timeout, this, [this] {
@@ -126,6 +129,7 @@ void Canvas::view_anim(float v)
 
 void Canvas::common_view_change(enum ViewPoint c)
 {
+    stopSpin();
     if (c == centerview) {
         scale = default_scale;
         center = default_center;
@@ -335,9 +339,7 @@ QString Canvas::statisticsText() const
         lines << QStringLiteral("FPS: %1").arg(qRound(fpsValue));
     }
     if (statisticsFlags & StatZoomProjection) {
-        lines << QStringLiteral("Zoom: %1x   %2")
-                     .arg(zoom, 0, 'f', 2)
-                     .arg(perspective > 0 ? "Perspective" : "Orthographic");
+        lines << QStringLiteral("Zoom: %1x   %2").arg(zoom, 0, 'f', 2).arg(perspective > 0 ? "Perspective" : "Orthographic");
     }
     if (statisticsFlags & StatDrawMode) {
         lines << QStringLiteral("Draw mode: %1").arg(drawModeNames[drawMode]);
@@ -360,6 +362,7 @@ QString Canvas::statisticsText() const
 
 void Canvas::resetTransform()
 {
+    stopSpin();
     currentTransform = defaultOrientation();
     zoom = 1;
 }
@@ -380,7 +383,9 @@ void Canvas::load_mesh(Mesh* m, bool is_reload)
     QVector3D upper(m->xmax(), m->ymax(), m->zmax());
     if (!is_reload) {
         default_center = center = (lower + upper) / 2;
-        default_scale = scale = 2 / (upper - lower).length();
+        // A degenerate (zero-size) bounding box would give an infinite scale
+        const float d = (upper - lower).length();
+        default_scale = scale = (d > 1e-12f) ? 2 / d : 1;
 
         // Reset other camera parameters
         zoom = 1;
@@ -478,13 +483,19 @@ void Canvas::paintGL()
         updateFrameStats();
     }
 
+    // Starting a QPainter on a GL widget is not free; skip it when there
+    // is no text to draw
+    const bool showStats = statisticsFlags && mesh;
+    if (!showStats && status.trimmed().isEmpty()) {
+        return;
+    }
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     float textHeight = painter.fontInfo().pointSize();
-    if (statisticsFlags && mesh)
+    if (showStats)
         painter.drawText(QRect(10, textHeight, width(), height()), statisticsText());
     painter.drawText(10, height() - textHeight, status);
-
 }
 
 void Canvas::draw_mesh()
@@ -516,9 +527,12 @@ void Canvas::draw_mesh()
     // Model opacity (animation override wins); translucent models blend
     const float alpha = (animModelOpacity >= 0) ? animModelOpacity : modelOpacity;
     glUniform1f(selected_mesh_shader->uniformLocation("model_alpha"), alpha);
-    if (alpha < 1.0f) {
+    const bool translucent = alpha < 1.0f;
+    if (translucent) {
         glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        // Don't let nearer translucent faces hide farther ones
+        glDepthMask(GL_FALSE);
     }
 
     // specific meshlight arguments
@@ -545,8 +559,7 @@ void Canvas::draw_mesh()
         // -1,-1,0 Light from top right
         // glUniform3f(selected_mesh_shader->uniformLocation("directive_light_direction"),-1.0f,-1.0f,0.0f);
         const QVector3D light_dir = animLightDirectionSet ? animLightDirection : listDir.at(currentLightDirection);
-        glUniform3f(selected_mesh_shader->uniformLocation("directive_light_direction"), light_dir.x(), light_dir.y(),
-                    light_dir.z());
+        glUniform3f(selected_mesh_shader->uniformLocation("directive_light_direction"), light_dir.x(), light_dir.y(), light_dir.z());
     }
 
     // Find and enable the attribute location for vertex position
@@ -557,6 +570,9 @@ void Canvas::draw_mesh()
     mesh->draw(vp);
 
     // Reset draw mode for the background and anything else that needs to be drawn
+    if (translucent) {
+        glDepthMask(GL_TRUE);
+    }
     glDisable(GL_BLEND);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
@@ -612,8 +628,8 @@ void Canvas::mouseReleaseEvent(QMouseEvent* event)
     }
     // Keep spinning with the drag's velocity if the release came straight
     // out of an active drag (not after the mouse stopped moving)
-    if (event->button() == Qt::LeftButton && momentumEnabled && drag_clock.isValid() &&
-        drag_clock.elapsed() < 150 && last_drag_speed > 30.0f) {
+    if (event->button() == Qt::LeftButton && momentumEnabled && drag_clock.isValid() && drag_clock.elapsed() < 150 &&
+        last_drag_speed > 30.0f) {
         last_drag_speed = std::min(last_drag_speed, 720.0f);
         spin_clock.start();
         spin_timer.start();
@@ -730,7 +746,7 @@ void Canvas::wheelEvent(QWheelEvent* event)
     if (delta != 0) {
         // Equivalent to multiplying/dividing by 1.001 once per delta unit
         const float factor = std::pow(1.001f, invertZoom ? delta : -delta);
-        zoom *= factor;
+        zoom = qBound(1e-4f, zoom * factor, 1e4f);
     }
 
     // Then find the cursor's GL position post-zoom and adjust center.
@@ -956,6 +972,7 @@ void Canvas::setAnimationAngles(float ax, float ay, float az)
 
 void Canvas::setAnimationAngles(float ax, float ay, float az, const QMatrix4x4& base)
 {
+    stopSpin();
     currentTransform = animation_rotation(ax, ay, az) * base;
     update();
 }
@@ -1006,7 +1023,7 @@ void Canvas::panView(float fx, float fy)
 
 void Canvas::zoomView(float factor)
 {
-    zoom *= factor;
+    zoom = qBound(1e-4f, zoom * factor, 1e4f);
     update();
 }
 

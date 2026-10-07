@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -13,8 +14,8 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QProcess>
-#include <QQuaternion>
 #include <QPushButton>
+#include <QQuaternion>
 #include <QRandomGenerator>
 #include <QSettings>
 #include <QStandardPaths>
@@ -26,6 +27,8 @@
 namespace
 {
 const int RECORD_FPS = 30;
+// Raw frames allowed to queue for ffmpeg before capture pauses to let it catch up
+const qint64 MAX_PENDING_BYTES = 64 * 1024 * 1024;
 
 // Built-in defaults (also used by the Defaults button)
 const double DEF_SPEED_X = 0, DEF_SPEED_Y = 20, DEF_SPEED_Z = 0;
@@ -158,10 +161,8 @@ RotationAnimationDialog::RotationAnimationDialog(QWidget* parent, Canvas* _canva
         speedRow->addWidget(axisSpeedMax[i]);
         axisForm->addRow("Speed range", speedRow);
 
-        axisIntMin[i] =
-            makeSecondsSpin(settings.value(QString("animate/intervalMin%1").arg(axisIds[i]), DEF_INTERVAL_MIN).toDouble());
-        axisIntMax[i] =
-            makeSecondsSpin(settings.value(QString("animate/intervalMax%1").arg(axisIds[i]), DEF_INTERVAL_MAX).toDouble());
+        axisIntMin[i] = makeSecondsSpin(settings.value(QString("animate/intervalMin%1").arg(axisIds[i]), DEF_INTERVAL_MIN).toDouble());
+        axisIntMax[i] = makeSecondsSpin(settings.value(QString("animate/intervalMax%1").arg(axisIds[i]), DEF_INTERVAL_MAX).toDouble());
         auto intRow = new QHBoxLayout;
         intRow->addWidget(axisIntMin[i]);
         intRow->addWidget(new QLabel("to"));
@@ -241,8 +242,9 @@ RotationAnimationDialog::RotationAnimationDialog(QWidget* parent, Canvas* _canva
     lightBrightness->setSingleStep(0.1);
     lightBrightness->setDecimals(2);
     lightBrightness->setValue(canvas->getLightBrightness());
-    connect(lightBrightness, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-            [this](double b) { canvas->setLightBrightness(b); });
+    connect(lightBrightness, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double b) {
+        canvas->setLightBrightness(b);
+    });
     lightForm->addRow("Brightness", lightBrightness);
 
     const char* axisNames[3] = {"X range", "Y range", "Z range"};
@@ -326,10 +328,17 @@ RotationAnimationDialog::RotationAnimationDialog(QWidget* parent, Canvas* _canva
 
     anim_timer.setInterval(16);
     connect(&anim_timer, &QTimer::timeout, this, &RotationAnimationDialog::tick);
+    // While recording, this timer (not anim_timer) drives the animation:
+    // each captured frame advances it by exactly 1/RECORD_FPS, so the video
+    // plays at the right speed even if capture or encoding runs slow.
     connect(&frame_timer, &QTimer::timeout, this, [this] {
-        if (!ffmpeg) {
-            return;
+        if (!ffmpeg || !canvas || ffmpeg->state() != QProcess::Running) {
+            return; // the finished/error handlers clean up a dead ffmpeg
         }
+        if (ffmpeg->bytesToWrite() > MAX_PENDING_BYTES) {
+            return; // ffmpeg is behind: pause (rather than skip) until it catches up
+        }
+        advance(1.0 / RECORD_FPS);
         QImage frame = canvas->grabAnimationFrame(ax, ay, az, base);
         // libx264 requires even dimensions
         frame = frame.copy(0, 0, frame.width() & ~1, frame.height() & ~1).convertToFormat(QImage::Format_RGBA8888);
@@ -337,6 +346,7 @@ RotationAnimationDialog::RotationAnimationDialog(QWidget* parent, Canvas* _canva
             ffmpeg->write((const char*)frame.constBits(), qint64(record_w) * record_h * 4);
         }
     });
+    frame_timer.setTimerType(Qt::PreciseTimer);
     frame_timer.setInterval(1000 / RECORD_FPS);
 
     updateButtons();
@@ -466,8 +476,16 @@ void RotationAnimationDialog::tickChannel(ColorChannel& ch, double dt)
 RotationAnimationDialog::~RotationAnimationDialog()
 {
     // Finalize any in-flight recording before children are destroyed
-    // (destroying the QProcess would kill ffmpeg and truncate the file)
+    // (destroying the QProcess would kill ffmpeg and truncate the file).
+    // stop() hands the process to `finishing`; wait for every encoder to
+    // complete, however long that takes.
     stop();
+    for (QProcess* proc : finishing) {
+        proc->disconnect(this);
+        if (proc->state() != QProcess::NotRunning) {
+            proc->waitForFinished(-1);
+        }
+    }
 }
 
 void RotationAnimationDialog::setSourceFile(const QString& path)
@@ -640,7 +658,11 @@ void RotationAnimationDialog::syncFeatureStates()
 
 void RotationAnimationDialog::tick()
 {
-    const double dt = clock.restart() / 1000.0;
+    advance(clock.restart() / 1000.0);
+}
+
+void RotationAnimationDialog::advance(double dt)
+{
     syncFeatureStates();
 
     if (rotationEnabled->isChecked()) {
@@ -748,7 +770,10 @@ QString RotationAnimationDialog::defaultRecordPath() const
         stem = info.completeBaseName();
     }
     if (dir.isEmpty()) {
-        dir = QStandardPaths::standardLocations(QStandardPaths::StandardLocation::MoviesLocation).first();
+        dir = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+        if (dir.isEmpty()) {
+            dir = QDir::homePath();
+        }
     }
 
     // Speeds (or "random" / "free") become part of the name
@@ -758,8 +783,7 @@ QString RotationAnimationDialog::defaultRecordPath() const
     } else if (anyAxisRandom()) {
         suffix = QStringLiteral("random");
     } else {
-        suffix = QStringLiteral("x%1_y%2_z%3")
-                     .arg(speed_tag(xSpeed->value()), speed_tag(ySpeed->value()), speed_tag(zSpeed->value()));
+        suffix = QStringLiteral("x%1_y%2_z%3").arg(speed_tag(xSpeed->value()), speed_tag(ySpeed->value()), speed_tag(zSpeed->value()));
     }
 
     // Avoid clobbering earlier takes
@@ -807,11 +831,31 @@ void RotationAnimationDialog::record()
     record_h = first.height() & ~1;
 
     ffmpeg = new QProcess(this);
-    ffmpeg->setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    ffmpeg->start(ffmpeg_path,
-                  {"-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                   QString("%1x%2").arg(record_w).arg(record_h), "-r", QString::number(RECORD_FPS), "-i", "-", "-c:v",
-                   "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path});
+    // Capture stderr so a failure can be reported in the status line
+    ffmpeg->setProcessChannelMode(QProcess::SeparateChannels);
+    ffmpeg->setStandardOutputFile(QProcess::nullDevice());
+    ffmpeg->start(ffmpeg_path, {"-y",
+                                "-loglevel",
+                                "error",
+                                "-f",
+                                "rawvideo",
+                                "-pix_fmt",
+                                "rgba",
+                                "-s",
+                                QString("%1x%2").arg(record_w).arg(record_h),
+                                "-r",
+                                QString::number(RECORD_FPS),
+                                "-i",
+                                "-",
+                                "-c:v",
+                                "libx264",
+                                "-preset",
+                                "veryfast",
+                                "-pix_fmt",
+                                "yuv420p",
+                                "-movflags",
+                                "+faststart",
+                                path});
     if (!ffmpeg->waitForStarted(5000)) {
         QMessageBox::warning(this, tr("Recording failed"), tr("Could not start ffmpeg."));
         delete ffmpeg;
@@ -821,10 +865,57 @@ void RotationAnimationDialog::record()
         return;
     }
 
+    // Connected only after a successful start, so these handle runtime
+    // failures (ffmpeg dying mid-recording) and normal completion
+    QProcess* proc = ffmpeg;
+    connect(proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, proc, path](int code, QProcess::ExitStatus status) {
+                ffmpegFinished(proc, path, status == QProcess::NormalExit && code == 0);
+            });
+    connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError) {
+        if (proc == ffmpeg) {
+            // Still recording: abandon it; finished() reports the outcome
+            abortRecording(proc);
+        }
+    });
+
     record_path = path;
     statusLabel->setText(QString("Recording to %1").arg(QFileInfo(path).fileName()));
+    anim_timer.stop(); // frame_timer drives the animation while recording
     frame_timer.start();
     updateButtons();
+}
+
+void RotationAnimationDialog::abortRecording(QProcess* proc)
+{
+    ffmpeg = nullptr;
+    finishing << proc;
+    recording = false;
+    stop();
+    statusLabel->setText(tr("Recording failed: ffmpeg stopped unexpectedly"));
+    if (proc->state() != QProcess::NotRunning) {
+        proc->kill(); // finished() follows and cleans up
+    }
+}
+
+void RotationAnimationDialog::ffmpegFinished(QProcess* proc, const QString& path, bool ok)
+{
+    if (proc == ffmpeg) {
+        // Exited while frames were still being sent
+        abortRecording(proc);
+        ok = false;
+    }
+    const QStringList errLines = QString::fromLocal8Bit(proc->readAllStandardError()).split('\n', Qt::SkipEmptyParts);
+    if (ok) {
+        statusLabel->setText(QString("Saved %1").arg(path));
+        statusLabel->setToolTip(QString());
+    } else {
+        statusLabel->setText(tr("Recording failed") + (errLines.isEmpty() ? QString() : ": " + errLines.last().trimmed()));
+        statusLabel->setToolTip(errLines.join('\n'));
+        QFile::remove(path);
+    }
+    finishing.removeAll(proc);
+    proc->deleteLater();
 }
 
 void RotationAnimationDialog::stop()
@@ -847,14 +938,14 @@ void RotationAnimationDialog::stop()
     savedDrawMode = -1;
 
     if (recording && ffmpeg) {
+        // Finish asynchronously: closing stdin lets ffmpeg flush and exit,
+        // and the finished() handler reports the result and cleans up
         statusLabel->setText("Finishing video...");
-        ffmpeg->closeWriteChannel();
-        ffmpeg->waitForFinished(60000);
-        const bool ok = (ffmpeg->exitStatus() == QProcess::NormalExit && ffmpeg->exitCode() == 0);
-        statusLabel->setText(ok ? QString("Saved %1").arg(record_path) : "Recording failed");
-        delete ffmpeg;
+        QProcess* proc = ffmpeg;
         ffmpeg = nullptr;
-    } else {
+        finishing << proc;
+        proc->closeWriteChannel();
+    } else if (finishing.isEmpty()) {
         statusLabel->setText(" ");
     }
     recording = false;

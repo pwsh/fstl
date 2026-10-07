@@ -16,6 +16,7 @@ public:
 private:
     QOpenGLBuffer vertices;
     QOpenGLBuffer indices;
+    GLsizei index_count = 0; // cached: QOpenGLBuffer::size() queries GL
 };
 
 #endif // GLMESH_H

@@ -79,6 +79,9 @@ private:
     };
 
     void tick();
+    void advance(double dt); // steps every animated property by dt seconds
+    void abortRecording(QProcess* proc);
+    void ffmpegFinished(QProcess* proc, const QString& path, bool ok);
     void tickChannel(ColorChannel& ch, double dt);
     void startChannel(ColorChannel& ch, const QColor& fallback);
     void nextChannelTarget(ColorChannel& ch);
@@ -161,7 +164,8 @@ private:
 
     bool playing = false;
     bool recording = false;
-    QProcess* ffmpeg = nullptr;
+    QProcess* ffmpeg = nullptr; // encoder for the in-progress recording
+    QList<QProcess*> finishing; // stopped recordings still being finalized
     QString record_path;
     int record_w = 0, record_h = 0;
 };

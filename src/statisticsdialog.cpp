@@ -16,11 +16,16 @@ namespace
 const QList<QPair<QString, int>>& statItems()
 {
     static const QList<QPair<QString, int>> defs = {
-        {"Triangle count", StatTriangles},     {"Bounding box", StatBoundingBox},
-        {"Model size", StatModelSize},          {"Orientation", StatOrientation},
-        {"Rotation speed", StatRotationSpeed},  {"Frame rate (FPS)", StatFps},
-        {"Zoom / projection", StatZoomProjection}, {"Draw mode", StatDrawMode},
-        {"Colors", StatColors},                 {"Lighting", StatLighting},
+        {"Triangle count", StatTriangles},
+        {"Bounding box", StatBoundingBox},
+        {"Model size", StatModelSize},
+        {"Orientation", StatOrientation},
+        {"Rotation speed", StatRotationSpeed},
+        {"Frame rate (FPS)", StatFps},
+        {"Zoom / projection", StatZoomProjection},
+        {"Draw mode", StatDrawMode},
+        {"Colors", StatColors},
+        {"Lighting", StatLighting},
     };
     return defs;
 }

@@ -1,3 +1,5 @@
+#include <QCoreApplication>
+#include <QDialogButtonBox>
 #include <QDirIterator>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -7,13 +9,12 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
-#include <QDialogButtonBox>
 #include <QProcess>
 #include <QProgressDialog>
-#include <QTextBrowser>
-#include <QVBoxLayout>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTextBrowser>
+#include <QVBoxLayout>
 
 #include "animatedialog.h"
 #include "canvas.h"
@@ -23,6 +24,45 @@
 #include "shaderlightprefs.h"
 #include "statisticsdialog.h"
 #include "window.h"
+
+#include <cmath>
+
+namespace
+{
+/*  Default directory for save/open dialogs; writableLocation() can be
+ *  empty (and standardLocations() an empty list) on minimal systems. */
+QString default_dir(QStandardPaths::StandardLocation loc)
+{
+    const QString dir = QStandardPaths::writableLocation(loc);
+    return dir.isEmpty() ? QDir::homePath() : dir;
+}
+
+/*  Settings carried by Export/Import Settings.  This is an allow-list:
+ *  machine-specific state (window/dialog geometry), recent files, and
+ *  above all the external "Open with" command (which Alt+S executes)
+ *  never travel in either direction. */
+bool is_portable_setting(const QString& key)
+{
+    static const QStringList keys = {// Window
+                                     "invertZoom", "autoreload", "drawAxes", "projection", "drawMode", "resetTransformOnLoad",
+                                     "momentumSpin",
+                                     // Canvas
+                                     "ambientColor", "ambientFactor", "directiveColor", "directiveFactor", "currentLightDirection",
+                                     "backgroundColor", "lightBrightness", "modelOpacity", "upAxisIsY"};
+    // Groups whose keys are only ever read by name by their owners
+    // (animation dialog, export dialogs, key bindings, statistics overlay)
+    static const QStringList groups = {"animate/", "exportPng/", "exportGif/", "exportMp4/", "keys/", "statistics/"};
+    if (keys.contains(key)) {
+        return true;
+    }
+    for (const auto& g : groups) {
+        if (key.startsWith(g)) {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
 
 const QString Window::OPEN_EXTERNAL_KEY = "externalCmd";
 const QString Window::RECENT_FILE_KEY = "recentFiles";
@@ -55,7 +95,7 @@ Window::Window(QWidget* parent) :
     wireframe_action(new QAction("&Wireframe", this)),
     surfaceangle_action(new QAction("Surface A&ngle", this)),
     meshlight_action(new QAction("Shaded &ambient and directive light source", this)),
-    drawModePrefs_action(new QAction("Draw Mode &Settings")),
+    drawModePrefs_action(new QAction("Draw Mode &Settings", this)),
     axes_action(new QAction("Draw &Axes", this)),
     invert_zoom_action(new QAction("Invert &Zoom", this)),
     reload_action(new QAction("Re&load", this)),
@@ -103,6 +143,10 @@ Window::Window(QWidget* parent) :
 
     QObject::connect(watcher, &QFileSystemWatcher::fileChanged, this, &Window::on_watched_change);
 
+    reload_timer.setSingleShot(true);
+    reload_timer.setInterval(200);
+    QObject::connect(&reload_timer, &QTimer::timeout, this, &Window::on_autoreload_timeout);
+
     open_action->setShortcut(QKeySequence::Open);
     QObject::connect(open_action, &QAction::triggered, this, &Window::on_open);
     this->addAction(open_action);
@@ -123,6 +167,8 @@ Window::Window(QWidget* parent) :
     reload_action->setShortcut(QKeySequence::Refresh);
     reload_action->setEnabled(false);
     QObject::connect(reload_action, &QAction::triggered, this, &Window::on_reload);
+    // Window-level so the shortcut keeps working with the menu bar hidden
+    this->addAction(reload_action);
 
     QObject::connect(about_action, &QAction::triggered, this, &Window::on_about);
 
@@ -221,6 +267,7 @@ Window::Window(QWidget* parent) :
     common_view_right_action->setShortcut(Qt::Key_6);
     common_view_center_action->setShortcut(Qt::Key_9);
     QObject::connect(common_views, &QActionGroup::triggered, this, &Window::on_common_view_change);
+    this->addActions(common_views->actions());
 
     const auto up_axis_menu = view_menu->addMenu("&Up Axis");
     up_axis_menu->addAction(up_axis_z_action);
@@ -233,12 +280,14 @@ Window::Window(QWidget* parent) :
     up_axes->setExclusive(true);
     up_axis_z_action->setChecked(!canvas->upAxisIsY());
     up_axis_y_action->setChecked(canvas->upAxisIsY());
-    QObject::connect(up_axes, &QActionGroup::triggered, this,
-                     [this](QAction* a) { canvas->setUpAxisIsY(a == up_axis_y_action); });
+    QObject::connect(up_axes, &QActionGroup::triggered, this, [this](QAction* a) {
+        canvas->setUpAxisIsY(a == up_axis_y_action);
+    });
 
     view_menu->addAction(axes_action);
     axes_action->setCheckable(true);
     QObject::connect(axes_action, &QAction::triggered, this, &Window::on_drawAxes);
+    this->addAction(axes_action);
 
     view_menu->addAction(statistics_action);
     QObject::connect(statistics_action, &QAction::triggered, this, &Window::on_statistics_dialog);
@@ -291,6 +340,26 @@ Window::Window(QWidget* parent) :
     help_menu->addAction(about_action);
 
     load_persist_settings();
+}
+
+Window::~Window()
+{
+    reload_timer.stop();
+
+    // A Loader is a QThread owned by this window: destroying it while it
+    // runs aborts the process.  Detach it from the window (no error
+    // dialogs, title or watcher updates while tearing down) and wait.
+    const auto loaders = findChildren<Loader*>(QString(), Qt::FindDirectChildrenOnly);
+    for (Loader* loader : loaders) {
+        QObject::disconnect(loader, nullptr, this, nullptr);
+        loader->wait();
+    }
+    // got_mesh stays connected so the mesh is never orphaned in the
+    // emit; deliver any still-queued delivery now so the canvas takes
+    // ownership (and frees it) instead of the event being dropped.
+    if (!loaders.isEmpty()) {
+        QCoreApplication::sendPostedEvents(canvas, QEvent::MetaCall);
+    }
 }
 
 void Window::load_persist_settings()
@@ -363,31 +432,60 @@ void Window::setup_bindable_actions()
 {
     // Movement and file-navigation actions live only as shortcuts (no
     // menu entries); auto-repeat makes held keys move continuously
-    const auto makeMove = [this](const QString& id, const QString& label, const QKeySequence& def,
-                                 const std::function<void()>& fn) {
+    const auto makeMove = [this](const QString& id, const QString& label, const QKeySequence& def, const std::function<void()>& fn) {
         auto act = new QAction(label, this);
         act->setShortcut(def);
         act->setAutoRepeat(true);
-        QObject::connect(act, &QAction::triggered, this, [fn] { fn(); });
+        QObject::connect(act, &QAction::triggered, this, [fn] {
+            fn();
+        });
         this->addAction(act);
         bindable_actions.append({id, label, act, def});
     };
 
     Canvas* c = canvas;
-    makeMove("prev_file", "Previous file in folder", QKeySequence(Qt::Key_Left), [this] { load_prev(); });
-    makeMove("next_file", "Next file in folder", QKeySequence(Qt::Key_Right), [this] { load_next(); });
-    makeMove("rotate_up", "Rotate up", QKeySequence(Qt::Key_W), [c] { c->rotateView(-5, 0); });
-    makeMove("rotate_down", "Rotate down", QKeySequence(Qt::Key_S), [c] { c->rotateView(5, 0); });
-    makeMove("rotate_left", "Rotate left", QKeySequence(Qt::Key_A), [c] { c->rotateView(0, -5); });
-    makeMove("rotate_right", "Rotate right", QKeySequence(Qt::Key_D), [c] { c->rotateView(0, 5); });
-    makeMove("roll_ccw", "Roll counter-clockwise", QKeySequence(Qt::Key_Q), [c] { c->rollView(-5); });
-    makeMove("roll_cw", "Roll clockwise", QKeySequence(Qt::Key_E), [c] { c->rollView(5); });
-    makeMove("pan_up", "Pan up", QKeySequence(Qt::SHIFT | Qt::Key_W), [c] { c->panView(0, -0.05f); });
-    makeMove("pan_down", "Pan down", QKeySequence(Qt::SHIFT | Qt::Key_S), [c] { c->panView(0, 0.05f); });
-    makeMove("pan_left", "Pan left", QKeySequence(Qt::SHIFT | Qt::Key_A), [c] { c->panView(-0.05f, 0); });
-    makeMove("pan_right", "Pan right", QKeySequence(Qt::SHIFT | Qt::Key_D), [c] { c->panView(0.05f, 0); });
-    makeMove("zoom_in", "Zoom in", QKeySequence(Qt::Key_Plus), [c] { c->zoomView(1 / 1.15f); });
-    makeMove("zoom_out", "Zoom out", QKeySequence(Qt::Key_Minus), [c] { c->zoomView(1.15f); });
+    makeMove("prev_file", "Previous file in folder", QKeySequence(Qt::Key_Left), [this] {
+        load_prev();
+    });
+    makeMove("next_file", "Next file in folder", QKeySequence(Qt::Key_Right), [this] {
+        load_next();
+    });
+    makeMove("rotate_up", "Rotate up", QKeySequence(Qt::Key_W), [c] {
+        c->rotateView(-5, 0);
+    });
+    makeMove("rotate_down", "Rotate down", QKeySequence(Qt::Key_S), [c] {
+        c->rotateView(5, 0);
+    });
+    makeMove("rotate_left", "Rotate left", QKeySequence(Qt::Key_A), [c] {
+        c->rotateView(0, -5);
+    });
+    makeMove("rotate_right", "Rotate right", QKeySequence(Qt::Key_D), [c] {
+        c->rotateView(0, 5);
+    });
+    makeMove("roll_ccw", "Roll counter-clockwise", QKeySequence(Qt::Key_Q), [c] {
+        c->rollView(-5);
+    });
+    makeMove("roll_cw", "Roll clockwise", QKeySequence(Qt::Key_E), [c] {
+        c->rollView(5);
+    });
+    makeMove("pan_up", "Pan up", QKeySequence(Qt::SHIFT | Qt::Key_W), [c] {
+        c->panView(0, -0.05f);
+    });
+    makeMove("pan_down", "Pan down", QKeySequence(Qt::SHIFT | Qt::Key_S), [c] {
+        c->panView(0, 0.05f);
+    });
+    makeMove("pan_left", "Pan left", QKeySequence(Qt::SHIFT | Qt::Key_A), [c] {
+        c->panView(-0.05f, 0);
+    });
+    makeMove("pan_right", "Pan right", QKeySequence(Qt::SHIFT | Qt::Key_D), [c] {
+        c->panView(0.05f, 0);
+    });
+    makeMove("zoom_in", "Zoom in", QKeySequence(Qt::Key_Plus), [c] {
+        c->zoomView(1 / 1.15f);
+    });
+    makeMove("zoom_out", "Zoom out", QKeySequence(Qt::Key_Minus), [c] {
+        c->zoomView(1.15f);
+    });
 
     // Common operations are rebindable too
     const auto bindable = [this](const QString& id, const QString& label, QAction* act) {
@@ -407,7 +505,28 @@ void Window::setup_bindable_actions()
 
 void Window::on_keybindings()
 {
-    KeyBindingsDialog dialog(this, bindable_actions);
+    // Every shortcut that is not user-rebindable (viewpoints, help,
+    // quit, open-with, ...) is off limits for the rebindable actions
+    QList<QAction*> bound;
+    for (const auto& b : bindable_actions) {
+        bound << b.action;
+    }
+    QList<FixedShortcut> fixed;
+    const auto all = findChildren<QAction*>();
+    for (QAction* a : all) {
+        if (bound.contains(a)) {
+            continue;
+        }
+        const QString label = a->text().remove('&');
+        for (const auto& seq : a->shortcuts()) {
+            if (!seq.isEmpty()) {
+                fixed.append({label, seq});
+            }
+        }
+    }
+    fixed.append({tr("Show menu bar"), QKeySequence(Qt::Key_Escape)}); // hard-wired in keyPressEvent
+
+    KeyBindingsDialog dialog(this, bindable_actions, fixed);
     dialog.exec();
 }
 
@@ -422,6 +541,9 @@ void Window::on_animate_dialog()
 
 void Window::on_export_mp4_rotation()
 {
+    // Momentum spin must not keep turning the model while frames render
+    canvas->stopSpin();
+
     const QString ffmpeg_path = QStandardPaths::findExecutable("ffmpeg");
     if (ffmpeg_path.isEmpty()) {
         QMessageBox::warning(this, tr("ffmpeg not found"),
@@ -436,9 +558,8 @@ void Window::on_export_mp4_rotation()
     }
     const auto opt = dialog.options();
 
-    auto file_name = QFileDialog::getSaveFileName(
-        this, tr("Export Rotation MP4"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::MoviesLocation).first(), "MP4 video (*.mp4)");
+    auto file_name = QFileDialog::getSaveFileName(this, tr("Export Rotation MP4"), default_dir(QStandardPaths::MoviesLocation),
+                                                  "MP4 video (*.mp4)");
     if (file_name.isEmpty()) {
         return;
     }
@@ -456,10 +577,30 @@ void Window::on_export_mp4_rotation()
     const int h = first.height() & ~1;
 
     QProcess proc;
-    proc.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    proc.start(ffmpeg_path, {"-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
-                             QString("%1x%2").arg(w).arg(h), "-r", QString::number(opt.fps), "-i", "-", "-c:v", "libx264",
-                             "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", file_name});
+    // stderr is captured (not forwarded) so a failure can be shown to the user
+    proc.setProcessChannelMode(QProcess::SeparateChannels);
+    proc.start(ffmpeg_path, {"-y",
+                             "-loglevel",
+                             "error",
+                             "-f",
+                             "rawvideo",
+                             "-pix_fmt",
+                             "rgba",
+                             "-s",
+                             QString("%1x%2").arg(w).arg(h),
+                             "-r",
+                             QString::number(opt.fps),
+                             "-i",
+                             "-",
+                             "-c:v",
+                             "libx264",
+                             "-preset",
+                             "veryfast",
+                             "-pix_fmt",
+                             "yuv420p",
+                             "-movflags",
+                             "+faststart",
+                             file_name});
     if (!proc.waitForStarted(5000)) {
         QMessageBox::warning(this, tr("Export failed"), tr("Could not start ffmpeg."));
         return;
@@ -469,11 +610,25 @@ void Window::on_export_mp4_rotation()
     QProgressDialog progress(tr("Exporting MP4..."), tr("Cancel"), 0, total, this);
     progress.setWindowModality(Qt::WindowModal);
 
+    // Last few lines of ffmpeg's error output, for the failure dialog
+    const auto stderr_tail = [&proc]() {
+        QString err = QString::fromLocal8Bit(proc.readAllStandardError()).trimmed();
+        if (err.size() > 1500) {
+            err = "..." + err.right(1500);
+        }
+        return err.isEmpty() ? QString() : "\n\n" + err;
+    };
+
     bool cancelled = false;
-    for (int i = 0; i < total; ++i) {
+    bool encoder_died = false;
+    for (int i = 0; i < total && !encoder_died; ++i) {
         progress.setValue(i);
         if (progress.wasCanceled()) {
             cancelled = true;
+            break;
+        }
+        if (proc.state() != QProcess::Running) {
+            encoder_died = true;
             break;
         }
         // Angles advance linearly: degrees * elapsed/duration, so the
@@ -483,15 +638,26 @@ void Window::on_export_mp4_rotation()
                            .scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
                            .convertToFormat(QImage::Format_RGBA8888);
         proc.write((const char*)frame.constBits(), qint64(w) * h * 4);
-        // Bound the write buffer so a slow encoder can't balloon memory
+        // Bound the write buffer so a slow encoder can't balloon memory;
+        // stop if ffmpeg exits early instead of waiting forever
         while (proc.bytesToWrite() > 64 * 1024 * 1024) {
-            proc.waitForBytesWritten(100);
+            if (!proc.waitForBytesWritten(100) && proc.state() != QProcess::Running) {
+                encoder_died = true;
+                break;
+            }
         }
     }
 
     if (cancelled) {
         proc.kill();
         proc.waitForFinished(5000);
+        QFile::remove(file_name);
+        return;
+    }
+    if (encoder_died) {
+        proc.waitForFinished(1000);
+        progress.cancel();
+        QMessageBox::warning(this, tr("Export failed"), tr("ffmpeg exited before all frames were written.") + stderr_tail());
         QFile::remove(file_name);
         return;
     }
@@ -502,16 +668,15 @@ void Window::on_export_mp4_rotation()
     progress.setValue(total);
 
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
-        QMessageBox::warning(this, tr("Export failed"), tr("ffmpeg reported an error while encoding."));
+        QMessageBox::warning(this, tr("Export failed"), tr("ffmpeg reported an error while encoding.") + stderr_tail());
     }
 }
 
 void Window::on_export_settings()
 {
-    auto path = QFileDialog::getSaveFileName(
-        this, tr("Export fstl settings"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::DocumentsLocation).first() + "/fstl-settings.ini",
-        "Settings files (*.ini)");
+    auto path =
+        QFileDialog::getSaveFileName(this, tr("Export fstl settings"),
+                                     default_dir(QStandardPaths::DocumentsLocation) + "/fstl-settings.ini", "Settings files (*.ini)");
     if (path.isEmpty()) {
         return;
     }
@@ -523,8 +688,7 @@ void Window::on_export_settings()
     QSettings out(path, QSettings::IniFormat);
     out.clear();
     for (const QString& key : current.allKeys()) {
-        // Window geometry is machine-specific; everything else travels
-        if (key != WINDOW_GEOM_KEY) {
+        if (is_portable_setting(key)) {
             out.setValue(key, current.value(key));
         }
     }
@@ -536,18 +700,21 @@ void Window::on_export_settings()
 
 void Window::on_import_settings()
 {
-    const auto path = QFileDialog::getOpenFileName(
-        this, tr("Import fstl settings"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::DocumentsLocation).first(),
-        "Settings files (*.ini)");
+    const auto path = QFileDialog::getOpenFileName(this, tr("Import fstl settings"), default_dir(QStandardPaths::DocumentsLocation),
+                                                   "Settings files (*.ini)");
     if (path.isEmpty()) {
         return;
     }
 
     QSettings in(path, QSettings::IniFormat);
     QSettings current;
+    int imported = 0;
     for (const QString& key : in.allKeys()) {
-        current.setValue(key, in.value(key));
+        // Only known, harmless keys: never e.g. the external command
+        if (is_portable_setting(key)) {
+            current.setValue(key, in.value(key));
+            ++imported;
+        }
     }
     current.sync();
 
@@ -558,7 +725,7 @@ void Window::on_import_settings()
                              tr("Imported %1 settings from %2.\n"
                                 "Some changes (dialogs, key bindings) apply when reopened;\n"
                                 "restart fstl to apply everything.")
-                                 .arg(in.allKeys().size())
+                                 .arg(imported)
                                  .arg(QFileInfo(path).fileName()));
 }
 
@@ -613,101 +780,100 @@ void Window::on_help_usage()
 
     auto browser = new QTextBrowser(dialog);
     browser->setOpenExternalLinks(true);
-    browser->setHtml(
-        "<h2>Mouse controls</h2>"
-        "<table cellspacing='4'>"
-        "<tr><td><b>Left-drag</b></td><td>Rotate the model (arcball)</td></tr>"
-        "<tr><td><b>Right-drag</b></td><td>Pan</td></tr>"
-        "<tr><td><b>Scroll wheel</b></td><td>Zoom about the cursor (invert via View &gt; Invert Zoom)</td></tr>"
-        "<tr><td><b>Drag &amp; drop</b></td><td>Drop an .stl file onto the window to open it</td></tr>"
-        "</table>"
+    browser->setHtml("<h2>Mouse controls</h2>"
+                     "<table cellspacing='4'>"
+                     "<tr><td><b>Left-drag</b></td><td>Rotate the model (arcball)</td></tr>"
+                     "<tr><td><b>Right-drag</b></td><td>Pan</td></tr>"
+                     "<tr><td><b>Scroll wheel</b></td><td>Zoom about the cursor (invert via View &gt; Invert Zoom)</td></tr>"
+                     "<tr><td><b>Drag &amp; drop</b></td><td>Drop an .stl file onto the window to open it</td></tr>"
+                     "</table>"
 
-        "<h2>Keyboard shortcuts</h2>"
-        "<table cellspacing='4'>"
-        "<tr><td><b>Ctrl+O</b></td><td>Open a file</td></tr>"
-        "<tr><td><b>Alt+S</b></td><td>Open the current file with an external program</td></tr>"
-        "<tr><td><b>Left / Right</b></td><td>Previous / next .stl file in the same folder</td></tr>"
-        "<tr><td><b>F5</b></td><td>Reload the current file</td></tr>"
-        "<tr><td><b>Ctrl+S</b></td><td>Save a screenshot</td></tr>"
-        "<tr><td><b>Ctrl+E</b></td><td>Export rotation PNGs</td></tr>"
-        "<tr><td><b>Ctrl+G</b></td><td>Export a rotating GIF</td></tr>"
-        "<tr><td><b>Ctrl+M</b></td><td>Export a rotation MP4 (requires ffmpeg)</td></tr>"
-        "<tr><td><b>W / A / S / D</b></td><td>Rotate the model in steps (hold to keep rotating)</td></tr>"
-        "<tr><td><b>Q / E</b></td><td>Roll counter-clockwise / clockwise</td></tr>"
-        "<tr><td><b>Shift+W/A/S/D</b></td><td>Pan</td></tr>"
-        "<tr><td><b>+ / -</b></td><td>Zoom in / out</td></tr>"
-        "<tr><td><b>0&ndash;6, 9</b></td><td>Viewpoints: 0 isometric, 1 top, 2 bottom, 3 front, 4 back, "
-        "5 left, 6 right, 9 center</td></tr>"
-        "<tr><td><b>F11</b></td><td>Toggle fullscreen</td></tr>"
-        "<tr><td><b>Ctrl+Shift+C</b></td><td>Hide the menu bar (<b>Esc</b> brings it back)</td></tr>"
-        "<tr><td><b>F1</b></td><td>This help</td></tr>"
-        "<tr><td><b>Ctrl+Q</b></td><td>Quit</td></tr>"
-        "</table>"
-        "<p>Movement, file-navigation, and the common shortcuts are rebindable via "
-        "<b>View &gt; Configure Keyboard Shortcuts</b>.</p>"
+                     "<h2>Keyboard shortcuts</h2>"
+                     "<table cellspacing='4'>"
+                     "<tr><td><b>Ctrl+O</b></td><td>Open a file</td></tr>"
+                     "<tr><td><b>Alt+S</b></td><td>Open the current file with an external program</td></tr>"
+                     "<tr><td><b>Left / Right</b></td><td>Previous / next .stl file in the same folder</td></tr>"
+                     "<tr><td><b>F5</b></td><td>Reload the current file</td></tr>"
+                     "<tr><td><b>Ctrl+S</b></td><td>Save a screenshot</td></tr>"
+                     "<tr><td><b>Ctrl+E</b></td><td>Export rotation PNGs</td></tr>"
+                     "<tr><td><b>Ctrl+G</b></td><td>Export a rotating GIF</td></tr>"
+                     "<tr><td><b>Ctrl+M</b></td><td>Export a rotation MP4 (requires ffmpeg)</td></tr>"
+                     "<tr><td><b>W / A / S / D</b></td><td>Rotate the model in steps (hold to keep rotating)</td></tr>"
+                     "<tr><td><b>Q / E</b></td><td>Roll counter-clockwise / clockwise</td></tr>"
+                     "<tr><td><b>Shift+W/A/S/D</b></td><td>Pan</td></tr>"
+                     "<tr><td><b>+ / -</b></td><td>Zoom in / out</td></tr>"
+                     "<tr><td><b>0&ndash;6, 9</b></td><td>Viewpoints: 0 isometric, 1 top, 2 bottom, 3 front, 4 back, "
+                     "5 left, 6 right, 9 center</td></tr>"
+                     "<tr><td><b>F11</b></td><td>Toggle fullscreen</td></tr>"
+                     "<tr><td><b>Ctrl+Shift+C</b></td><td>Hide the menu bar (<b>Esc</b> brings it back)</td></tr>"
+                     "<tr><td><b>F1</b></td><td>This help</td></tr>"
+                     "<tr><td><b>Ctrl+Q</b></td><td>Quit</td></tr>"
+                     "</table>"
+                     "<p>Movement, file-navigation, and the common shortcuts are rebindable via "
+                     "<b>View &gt; Configure Keyboard Shortcuts</b>.</p>"
 
-        "<h2>Menus</h2>"
-        "<p><b>File</b></p><ul>"
-        "<li><b>Open / Open recent</b> &mdash; load an .stl file (the last 8 are remembered)</li>"
-        "<li><b>Open with</b> &mdash; send the current file to an external program (chosen on first use)</li>"
-        "<li><b>Reload / Autoreload</b> &mdash; re-read the file manually, or automatically whenever it "
-        "changes on disk (useful while exporting from CAD)</li>"
-        "<li><b>Save Screenshot</b> &mdash; save the current view as PNG or JPG</li>"
-        "<li><b>Export Rotation PNGs</b> &mdash; save a series of views rotated in even steps about a "
-        "chosen screen axis</li>"
-        "<li><b>Export Rotating GIF</b> &mdash; save an animated turntable GIF; <i>Loop</i> sweeps up to "
-        "360&deg; continuously, <i>Bounce</i> swings between two angles (e.g. -90&deg; to +90&deg;)</li>"
-        "<li><b>Export Rotation MP4</b> &mdash; save a video of the model rotating; set the duration and "
-        "the total degrees per axis (may exceed 360&deg; &mdash; e.g. X=720&deg; with Y=360&deg; spins X twice "
-        "as fast). Requires ffmpeg.</li>"
-        "</ul>"
-        "<p><b>View</b></p><ul>"
-        "<li><b>Projection</b> &mdash; perspective or orthographic camera</li>"
-        "<li><b>Draw Mode</b> &mdash; <i>Shaded</i> (depth-shaded), <i>Wireframe</i>, <i>Surface Angle</i> "
-        "(colors faces by inclination), or <i>Shaded ambient and directive light source</i> (configurable "
-        "colors and light direction via <b>Draw Mode Settings</b>, which also offers a <i>background "
-        "color</i> picker for every mode &mdash; Reset restores the gradient)</li>"
-        "<li><b>Viewpoint</b> &mdash; jump to standard views or re-center the model</li>"
-        "<li><b>Up Axis</b> &mdash; whether the viewpoint presets treat <i>Z</i> (the STL / "
-        "3D-printing default) or <i>Y</i> as the model's up axis. Switch to <i>Y up</i> if Top and "
-        "Front appear swapped, which means the model was authored Y-up.</li>"
-        "<li><b>Draw Axes</b> &mdash; show the model-space axes and the orientation hud in the corner</li>"
-        "<li><b>Statistics</b> &mdash; opens a dialog to choose which figures to overlay (triangle count, "
-        "bounding box, model size, orientation, rotation speed, FPS, zoom/projection, draw mode, colors, "
-        "lighting). A master <i>Show statistics overlay</i> switch turns the whole overlay on or off; "
-        "off by default.</li>"
-        "<li><b>Invert Zoom</b> &mdash; flip the scroll-wheel zoom direction</li>"
-        "<li><b>Reset rotation on load</b> &mdash; whether opening a file resets the orientation</li>"
-        "<li><b>Momentum Spin</b> &mdash; when enabled, releasing a drag keeps the model spinning with "
-        "the drag's velocity and trajectory (a faster flick spins faster); click to stop. Off by "
-        "default.</li>"
-        "<li><b>Animate Rotation</b> &mdash; continuous rotation with per-axis speeds (default: slow Y "
-        "turntable). Random mode changes speed and axis at random intervals (configurable min/max "
-        "seconds) with smooth transitions, continuing from the current view. Optional random cycling of "
-        "the <i>model</i>, <i>light</i>, and <i>background</i> colors (through a user palette, or any "
-        "color when the palette is empty), and a selectable or randomly moving light source &mdash; all "
-        "smoothly blended. Recordings save next to the source file, named after it plus the axis speeds "
-        "(or <code>random</code>). Fixed-speed playback always starts from the default orientation so "
-        "the same settings reproduce the same motion.</li>"
-        "<li><b>Configure Keyboard Shortcuts</b> &mdash; rebind file navigation, movement, and common "
-        "operations</li>"
-        "</ul>"
+                     "<h2>Menus</h2>"
+                     "<p><b>File</b></p><ul>"
+                     "<li><b>Open / Open recent</b> &mdash; load an .stl file (the last 8 are remembered)</li>"
+                     "<li><b>Open with</b> &mdash; send the current file to an external program (chosen on first use)</li>"
+                     "<li><b>Reload / Autoreload</b> &mdash; re-read the file manually, or automatically whenever it "
+                     "changes on disk (useful while exporting from CAD)</li>"
+                     "<li><b>Save Screenshot</b> &mdash; save the current view as PNG or JPG</li>"
+                     "<li><b>Export Rotation PNGs</b> &mdash; save a series of views rotated in even steps about a "
+                     "chosen screen axis</li>"
+                     "<li><b>Export Rotating GIF</b> &mdash; save an animated turntable GIF; <i>Loop</i> sweeps up to "
+                     "360&deg; continuously, <i>Bounce</i> swings between two angles (e.g. -90&deg; to +90&deg;)</li>"
+                     "<li><b>Export Rotation MP4</b> &mdash; save a video of the model rotating; set the duration and "
+                     "the total degrees per axis (may exceed 360&deg; &mdash; e.g. X=720&deg; with Y=360&deg; spins X twice "
+                     "as fast). Requires ffmpeg.</li>"
+                     "</ul>"
+                     "<p><b>View</b></p><ul>"
+                     "<li><b>Projection</b> &mdash; perspective or orthographic camera</li>"
+                     "<li><b>Draw Mode</b> &mdash; <i>Shaded</i> (depth-shaded), <i>Wireframe</i>, <i>Surface Angle</i> "
+                     "(colors faces by inclination), or <i>Shaded ambient and directive light source</i> (configurable "
+                     "colors and light direction via <b>Draw Mode Settings</b>, which also offers a <i>background "
+                     "color</i> picker for every mode &mdash; Reset restores the gradient)</li>"
+                     "<li><b>Viewpoint</b> &mdash; jump to standard views or re-center the model</li>"
+                     "<li><b>Up Axis</b> &mdash; whether the viewpoint presets treat <i>Z</i> (the STL / "
+                     "3D-printing default) or <i>Y</i> as the model's up axis. Switch to <i>Y up</i> if Top and "
+                     "Front appear swapped, which means the model was authored Y-up.</li>"
+                     "<li><b>Draw Axes</b> &mdash; show the model-space axes and the orientation hud in the corner</li>"
+                     "<li><b>Statistics</b> &mdash; opens a dialog to choose which figures to overlay (triangle count, "
+                     "bounding box, model size, orientation, rotation speed, FPS, zoom/projection, draw mode, colors, "
+                     "lighting). A master <i>Show statistics overlay</i> switch turns the whole overlay on or off; "
+                     "off by default.</li>"
+                     "<li><b>Invert Zoom</b> &mdash; flip the scroll-wheel zoom direction</li>"
+                     "<li><b>Reset rotation on load</b> &mdash; whether opening a file resets the orientation</li>"
+                     "<li><b>Momentum Spin</b> &mdash; when enabled, releasing a drag keeps the model spinning with "
+                     "the drag's velocity and trajectory (a faster flick spins faster); click to stop. Off by "
+                     "default.</li>"
+                     "<li><b>Animate Rotation</b> &mdash; continuous rotation with per-axis speeds (default: slow Y "
+                     "turntable). Random mode changes speed and axis at random intervals (configurable min/max "
+                     "seconds) with smooth transitions, continuing from the current view. Optional random cycling of "
+                     "the <i>model</i>, <i>light</i>, and <i>background</i> colors (through a user palette, or any "
+                     "color when the palette is empty), and a selectable or randomly moving light source &mdash; all "
+                     "smoothly blended. Recordings save next to the source file, named after it plus the axis speeds "
+                     "(or <code>random</code>). Fixed-speed playback always starts from the default orientation so "
+                     "the same settings reproduce the same motion.</li>"
+                     "<li><b>Configure Keyboard Shortcuts</b> &mdash; rebind file navigation, movement, and common "
+                     "operations</li>"
+                     "</ul>"
 
-        "<h2>Command line</h2>"
-        "<p>Run <code>fstl --help</code> in a terminal or see <code>man fstl</code> for full details.</p>"
-        "<table cellspacing='4'>"
-        "<tr><td><code>fstl model.stl</code></td><td>open the viewer</td></tr>"
-        "<tr><td><code>-f, --foreground</code></td><td>keep the GUI attached to the terminal</td></tr>"
-        "<tr><td><code>--export-png / --export-gif</code></td><td>render to images without a window</td></tr>"
-        "<tr><td><code>--color, --bg</code></td><td>model / background color (names or hex; background "
-        "defaults to transparent)</td></tr>"
-        "<tr><td><code>--width, --height</code></td><td>max output size (PNG 1024, GIF 640; aspect kept)</td></tr>"
-        "<tr><td><code>--axis, --angles</code></td><td>rotation axis (x/y/z) and PNG view angles</td></tr>"
-        "<tr><td><code>--sweep, --step, --fps</code></td><td>GIF loop: degrees, step per frame, speed</td></tr>"
-        "<tr><td><code>--bounce --from --to</code></td><td>GIF: bounce between two angles</td></tr>"
-        "<tr><td><code>-i, --input-dir, -o, --output-dir</code></td><td>batch inputs and output naming; "
-        "<code>-</code> reads stdin</td></tr>"
-        "</table>");
+                     "<h2>Command line</h2>"
+                     "<p>Run <code>fstl --help</code> in a terminal or see <code>man fstl</code> for full details.</p>"
+                     "<table cellspacing='4'>"
+                     "<tr><td><code>fstl model.stl</code></td><td>open the viewer</td></tr>"
+                     "<tr><td><code>-f, --foreground</code></td><td>keep the GUI attached to the terminal</td></tr>"
+                     "<tr><td><code>--export-png / --export-gif</code></td><td>render to images without a window</td></tr>"
+                     "<tr><td><code>--color, --bg</code></td><td>model / background color (names or hex; background "
+                     "defaults to transparent)</td></tr>"
+                     "<tr><td><code>--width, --height</code></td><td>max output size (PNG 1024, GIF 640; aspect kept)</td></tr>"
+                     "<tr><td><code>--axis, --angles</code></td><td>rotation axis (x/y/z) and PNG view angles</td></tr>"
+                     "<tr><td><code>--sweep, --step, --fps</code></td><td>GIF loop: degrees, step per frame, speed</td></tr>"
+                     "<tr><td><code>--bounce --from --to</code></td><td>GIF: bounce between two angles</td></tr>"
+                     "<tr><td><code>-i, --input-dir, -o, --output-dir</code></td><td>batch inputs and output naming; "
+                     "<code>-</code> reads stdin</td></tr>"
+                     "</table>");
 
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
     QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
@@ -837,10 +1003,41 @@ void Window::on_resetTransformOnLoad(bool d)
     QSettings().setValue(RESET_TRANSFORM_ON_LOAD_KEY, d);
 }
 
-void Window::on_watched_change(const QString& filename)
+void Window::on_watched_change(const QString& /*filename*/)
 {
     if (autoreload_action->isChecked()) {
-        load_stl(filename, true);
+        // Debounce: restart the timer on every notification
+        reload_pending = true;
+        reload_timer.start();
+    }
+}
+
+void Window::on_autoreload_timeout()
+{
+    if (!reload_pending || !autoreload_action->isChecked() || current_file.isEmpty()) {
+        reload_pending = false;
+        return;
+    }
+    if (!open_action->isEnabled()) {
+        return; // a load is running; on_loader_finished() retries
+    }
+    reload_pending = false;
+    load_stl(current_file, true);
+}
+
+void Window::on_loader_finished()
+{
+    enable_open();
+
+    // Editors that save by replace/rename make the watcher drop the
+    // file; set_watched() re-adds it after a successful load, but a load
+    // that failed (e.g. caught the file mid-write) must re-add it too
+    if (!current_file.isEmpty() && !watcher->files().contains(current_file) && QFileInfo::exists(current_file)) {
+        watcher->addPath(current_file);
+    }
+
+    if (reload_pending) {
+        reload_timer.start();
     }
 }
 
@@ -873,9 +1070,8 @@ void Window::on_loaded(const QString& filename)
 void Window::on_save_screenshot()
 {
     const auto image = canvas->grabFramebuffer();
-    auto file_name = QFileDialog::getSaveFileName(
-        this, tr("Save Screenshot Image"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::PicturesLocation).first(), "Images (*.png *.jpg)");
+    auto file_name = QFileDialog::getSaveFileName(this, tr("Save Screenshot Image"), default_dir(QStandardPaths::PicturesLocation),
+                                                  "Images (*.png *.jpg)");
     if (file_name.isEmpty()) {
         return; // dialog cancelled
     }
@@ -893,15 +1089,16 @@ void Window::on_save_screenshot()
 
 void Window::on_export_png_rotation()
 {
+    canvas->stopSpin();
+
     PngExportDialog dialog(this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
     const auto opt = dialog.options();
 
-    auto file_name = QFileDialog::getSaveFileName(
-        this, tr("Export Rotation PNGs (base name)"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::PicturesLocation).first(), "Images (*.png)");
+    auto file_name = QFileDialog::getSaveFileName(this, tr("Export Rotation PNGs (base name)"),
+                                                  default_dir(QStandardPaths::PicturesLocation), "Images (*.png)");
     if (file_name.isEmpty()) {
         return;
     }
@@ -920,10 +1117,8 @@ void Window::on_export_png_rotation()
             return;
         }
         const QImage frame = canvas->grabRotatedFrame(angles[i], opt.axis);
-        const auto out = QString("%1_%2_%3deg.png")
-                             .arg(file_name)
-                             .arg(i, 3, 10, QChar('0'))
-                             .arg(qRound(angles[i]));
+        // Append rather than .arg() the user's name: a '%2' in it must stay literal
+        const auto out = file_name + QString("_%1_%2deg.png").arg(i, 3, 10, QChar('0')).arg(qRound(angles[i]));
         all_ok &= frame.save(out);
     }
     progress.setValue(angles.size());
@@ -935,15 +1130,16 @@ void Window::on_export_png_rotation()
 
 void Window::on_export_gif_rotation()
 {
+    canvas->stopSpin();
+
     GifExportDialog dialog(this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
     const auto opt = dialog.options();
 
-    auto file_name = QFileDialog::getSaveFileName(
-        this, tr("Export Rotating GIF"),
-        QStandardPaths::standardLocations(QStandardPaths::StandardLocation::PicturesLocation).first(), "GIF images (*.gif)");
+    auto file_name = QFileDialog::getSaveFileName(this, tr("Export Rotating GIF"), default_dir(QStandardPaths::PicturesLocation),
+                                                  "GIF images (*.gif)");
     if (file_name.isEmpty()) {
         return;
     }
@@ -971,15 +1167,17 @@ void Window::on_export_gif_rotation()
     QImage first = renderFrame(angles[0]);
     const uint32_t w = first.width();
     const uint32_t h = first.height();
-    const uint32_t delay_cs = std::max(1, 100 / opt.fps); // GIF delays are in centiseconds
+    // GIF delays are in centiseconds; browsers treat < 2 cs as 10 cs
+    const uint32_t delay_cs = uint32_t(std::max(2L, std::lround(100.0 / opt.fps)));
 
     GifWriter writer;
-    if (!GifBegin(&writer, file_name.toLocal8Bit().constData(), w, h, delay_cs)) {
+    if (!GifBegin(&writer, file_name.toUtf8().constData(), w, h, delay_cs)) {
         QMessageBox::warning(this, tr("Error Saving GIF"), tr("Unable to open the output file for writing."));
         return;
     }
 
     bool cancelled = false;
+    bool write_ok = true;
     for (size_t i = 0; i < angles.size(); ++i) {
         progress.setValue(i);
         if (progress.wasCanceled()) {
@@ -988,16 +1186,21 @@ void Window::on_export_gif_rotation()
         }
         QImage frame = (i == 0) ? first : renderFrame(angles[i]);
         if (uint32_t(frame.width()) != w || uint32_t(frame.height()) != h) {
-            frame = frame.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                        .convertToFormat(QImage::Format_RGBA8888);
+            frame = frame.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
         }
-        GifWriteFrame(&writer, frame.constBits(), w, h, delay_cs);
+        if (!GifWriteFrame(&writer, frame.constBits(), w, h, delay_cs)) {
+            write_ok = false;
+            break;
+        }
     }
-    GifEnd(&writer);
+    write_ok &= GifEnd(&writer);
     progress.setValue(angles.size());
 
-    if (cancelled) {
+    if (cancelled || !write_ok) {
         QFile::remove(file_name);
+    }
+    if (!write_ok && !cancelled) {
+        QMessageBox::warning(this, tr("Error Saving GIF"), tr("Unable to write the GIF (disk full or not writable?)."));
     }
 }
 
@@ -1034,9 +1237,10 @@ void Window::rebuild_recent_files()
 
 void Window::on_reload()
 {
-    auto fs = watcher->files();
-    if (fs.size() == 1) {
-        load_stl(fs[0], true);
+    // The watcher can transiently lose the file (replace-on-save), so
+    // reload what was last loaded rather than what is being watched
+    if (!current_file.isEmpty()) {
+        load_stl(current_file, true);
     }
 }
 
@@ -1062,13 +1266,15 @@ void Window::on_common_view_change(QAction* common)
 
 bool Window::load_stl(const QString& filename, bool is_reload)
 {
-    if (!open_action->isEnabled())
+    if (filename.isEmpty() || !open_action->isEnabled())
         return false;
 
+    // Disable synchronously: waiting for Loader::started would let a
+    // second load_stl() slip in before the queued signal arrives
+    disable_open();
     canvas->set_status("Loading " + filename);
 
     Loader* loader = new Loader(this, filename, is_reload);
-    connect(loader, &Loader::started, this, &Window::disable_open);
 
     connect(loader, &Loader::got_mesh, canvas, &Canvas::load_mesh);
     connect(loader, &Loader::error_bad_stl, this, &Window::on_bad_stl);
@@ -1076,10 +1282,10 @@ bool Window::load_stl(const QString& filename, bool is_reload)
     connect(loader, &Loader::error_missing_file, this, &Window::on_missing_file);
 
     connect(loader, &Loader::finished, loader, &Loader::deleteLater);
-    connect(loader, &Loader::finished, this, &Window::enable_open);
+    connect(loader, &Loader::finished, this, &Window::on_loader_finished);
     connect(loader, &Loader::finished, canvas, &Canvas::clear_status);
 
-    if (filename[0] != ':') {
+    if (!filename.startsWith(':')) {
         connect(loader, &Loader::loaded_file, this, &Window::setWindowTitle);
         connect(loader, &Loader::loaded_file, this, &Window::set_watched);
         connect(loader, &Loader::loaded_file, this, &Window::on_loaded);
@@ -1094,14 +1300,17 @@ void Window::dragEnterEvent(QDragEnterEvent* event)
 {
     if (event->mimeData()->hasUrls()) {
         auto urls = event->mimeData()->urls();
-        if (urls.size() == 1 && urls.front().path().endsWith(".stl", Qt::CaseInsensitive))
+        if (urls.size() == 1 && urls.front().isLocalFile() && urls.front().path().endsWith(".stl", Qt::CaseInsensitive))
             event->acceptProposedAction();
     }
 }
 
 void Window::dropEvent(QDropEvent* event)
 {
-    load_stl(event->mimeData()->urls().front().toLocalFile());
+    const auto urls = event->mimeData()->urls();
+    if (!urls.isEmpty() && urls.front().isLocalFile()) {
+        load_stl(urls.front().toLocalFile());
+    }
 }
 
 void Window::closeEvent(QCloseEvent* event)

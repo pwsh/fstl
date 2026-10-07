@@ -168,6 +168,7 @@ QImage OffscreenRenderer::renderFrameTriple(const QVector3D& anglesDeg, const QS
 QImage OffscreenRenderer::renderWithTransform(const QMatrix4x4& transform, const QSize& size)
 {
     if (!context.makeCurrent(&surface)) {
+        error = "could not make the OpenGL context current";
         return QImage();
     }
 
@@ -175,6 +176,18 @@ QImage OffscreenRenderer::renderWithTransform(const QMatrix4x4& transform, const
         QOpenGLFramebufferObjectFormat fmt;
         fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
         fbo.reset(new QOpenGLFramebufferObject(size, fmt));
+        if (!fbo->isValid()) {
+            fbo.reset();
+            GLint maxSize = 0;
+            glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxSize);
+            error = QString("could not create a %1x%2 framebuffer: the requested size exceeds the OpenGL limits")
+                        .arg(size.width())
+                        .arg(size.height());
+            if (maxSize > 0) {
+                error += QString(" (max %1 px per side)").arg(maxSize);
+            }
+            return QImage();
+        }
     }
     fbo->bind();
     glViewport(0, 0, size.width(), size.height());

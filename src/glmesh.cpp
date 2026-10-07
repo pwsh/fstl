@@ -18,6 +18,7 @@ GLMesh::GLMesh(const Mesh* const mesh) : vertices(QOpenGLBuffer::VertexBuffer), 
     indices.bind();
     indices.allocate(mesh->indices.data(), mesh->indices.size() * sizeof(uint32_t));
     indices.release();
+    index_count = GLsizei(mesh->indices.size());
 }
 
 void GLMesh::draw(GLuint vp)
@@ -26,7 +27,7 @@ void GLMesh::draw(GLuint vp)
     indices.bind();
 
     glVertexAttribPointer(vp, 3, GL_FLOAT, false, 3 * sizeof(float), NULL);
-    glDrawElements(GL_TRIANGLES, indices.size() / sizeof(uint32_t), GL_UNSIGNED_INT, NULL);
+    glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, NULL);
 
     vertices.release();
     indices.release();

@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QImage>
 #include <QSurfaceFormat>
+#include <cmath>
 #include <cstdio>
 
 #include "../src/canvas.h"
@@ -30,12 +31,13 @@ int main(int argc, char* argv[])
     // Load the bundled sphere synchronously
     bool loaded = false;
     Loader loader(nullptr, ":gl/sphere.stl", false);
-    QObject::connect(&loader, &Loader::got_mesh, &canvas,
-                     [&](Mesh* m, bool reload) {
-                         canvas.load_mesh(m, reload);
-                         loaded = true;
-                     },
-                     Qt::DirectConnection);
+    QObject::connect(
+        &loader, &Loader::got_mesh, &canvas,
+        [&](Mesh* m, bool reload) {
+            canvas.load_mesh(m, reload);
+            loaded = true;
+        },
+        Qt::DirectConnection);
     loader.run();
     if (!loaded) {
         printf("FAIL: mesh did not load\n");
@@ -92,6 +94,38 @@ int main(int argc, char* argv[])
     // forward: -90..90 inclusive = 19, back: 80..-80 = 17 → 36
     if (bounce.gifAngles().size() != 36) {
         printf("FAIL: gifAngles bounce count %zu\n", bounce.gifAngles().size());
+        return 1;
+    }
+    if (bounce.gifAngles().front() != -90.0f || bounce.gifAngles()[18] != 90.0f || bounce.gifAngles().back() != -80.0f) {
+        printf("FAIL: gifAngles bounce endpoints\n");
+        return 1;
+    }
+    // Non-dividing range: -90..-65 step 10 -> -90,-80,-70,-65 then -75,-85
+    bounce.endAngle = -65;
+    if (bounce.gifAngles().size() != 6) {
+        printf("FAIL: gifAngles partial bounce count %zu\n", bounce.gifAngles().size());
+        return 1;
+    }
+    // Huge or non-finite ranges must terminate promptly with no frames
+    // (previously a float accumulator could loop forever)
+    RotationExportOptions huge;
+    huge.bounce = true;
+    huge.startAngle = -1e8f;
+    huge.endAngle = 1e8f;
+    huge.step = 0.5f;
+    if (!huge.gifAngles().empty()) {
+        printf("FAIL: gifAngles huge bounce returned %zu frames\n", huge.gifAngles().size());
+        return 1;
+    }
+    huge.endAngle = INFINITY;
+    if (!huge.gifAngles().empty()) {
+        printf("FAIL: gifAngles infinite bounce\n");
+        return 1;
+    }
+    huge.bounce = false;
+    huge.sweep = 1e9f;
+    if (!huge.gifAngles().empty()) {
+        printf("FAIL: gifAngles huge sweep\n");
         return 1;
     }
 

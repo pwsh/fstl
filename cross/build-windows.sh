@@ -3,7 +3,9 @@
 # a standalone Windows release into /src/dist-windows.
 set -euo pipefail
 
-QT_WIN=/opt/qt/6.4.2/mingw_64
+QT_VERSION=${QT_VERSION:-6.10.3}
+QT_WIN=/opt/qt/$QT_VERSION/mingw_64
+QT_HOST=/opt/qt/$QT_VERSION/gcc_64
 BUILD=/src/build-windows
 DIST=/src/dist-windows/fstl
 
@@ -11,7 +13,7 @@ cmake -S /src -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE=/src/cross/toolchain-mingw64.cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="$QT_WIN" \
-    -DQT_HOST_PATH=/usr
+    -DQT_HOST_PATH="$QT_HOST"
 cmake --build "$BUILD" -j"$(nproc)"
 
 rm -rf "$DIST"

@@ -30,8 +30,10 @@ void Backdrop::draw()
     glVertexAttribPointer(vp, 2, GL_FLOAT, false, 5 * sizeof(GLfloat), 0);
     glVertexAttribPointer(vc, 3, GL_FLOAT, false, 5 * sizeof(GLfloat), (GLvoid*)(2 * sizeof(GLfloat)));
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+    glDisableVertexAttribArray(vp);
+    glDisableVertexAttribArray(vc);
     vertices.release();
     shader.release();
 }

@@ -1,11 +1,12 @@
 #include <QApplication>
-#include <QDir>
-#include <QFile>
 
 #include <cstring>
 
 #ifdef Q_OS_UNIX
-#include <unistd.h>
+#    include <cerrno>
+#    include <sys/stat.h>
+#    include <sys/types.h>
+#    include <unistd.h>
 #endif
 
 #include "app.h"
@@ -20,10 +21,19 @@ void ensure_runtime_dir()
 {
 #ifdef Q_OS_UNIX
     if (qEnvironmentVariableIsEmpty("XDG_RUNTIME_DIR")) {
-        const QString path = QString("/tmp/fstl-runtime-%1").arg(getuid());
-        QDir().mkpath(path);
-        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
-        qputenv("XDG_RUNTIME_DIR", path.toLocal8Bit());
+        // The path is predictable, so another user could pre-create it:
+        // only use it if it is a real directory we own with no group or
+        // other access.  Otherwise leave XDG_RUNTIME_DIR unset (Qt then
+        // just warns and uses its own fallback).
+        const QByteArray path = QByteArray("/tmp/fstl-runtime-") + QByteArray::number(qulonglong(getuid()));
+        if (mkdir(path.constData(), 0700) != 0 && errno != EEXIST) {
+            return;
+        }
+        struct stat st;
+        if (lstat(path.constData(), &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077) != 0) {
+            return;
+        }
+        qputenv("XDG_RUNTIME_DIR", path);
     }
 #endif
 }
